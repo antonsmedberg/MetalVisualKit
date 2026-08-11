@@ -30,12 +30,15 @@ final class PointCloudRenderer: NSObject, MTKViewDelegate {
         ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth)
     }
 
+    static func requiresTextureCache(for source: PointCloudSource) -> Bool {
+        source == .live
+    }
+
     let source: PointCloudSource
     var maxDepth: Float = 5
-    /// Sprite size in points at one metre. The shader divides by clip-space w
-    /// and caps at 12 px — a large value here just pins every point to the cap
-    /// and buys nothing but fragment overdraw.
-    var pointSize: Float = 8
+    /// Live sprite size in layout points at one metre. More distant samples
+    /// shrink with perspective in the vertex shader.
+    var livePointSize: Float = 8
     var motionScale: Float = 1
     /// Pushed in from the SwiftUI layer, which reads it on the main actor.
     /// The renderer must not touch `UIApplication` from the draw callback.
@@ -51,6 +54,7 @@ final class PointCloudRenderer: NSObject, MTKViewDelegate {
     private var viewportSize: CGSize = .zero
     private var viewportPointSize: CGSize = .zero
     private let demoPointCount = 24_000
+    private let demoPointSize: Float = 2.6
     private var cachedFallbackConfidence: MTLTexture?
     private var lastRenderedFrameTimestamp: TimeInterval = -1
     private var isActive = false
@@ -58,6 +62,7 @@ final class PointCloudRenderer: NSObject, MTKViewDelegate {
     /// Advanced by rendered frame deltas, not wall clock, so time does not jump
     /// by the length of a backgrounded interval on the first frame back.
     private var simulationTime: Double = 0
+    private var demoOrbit = DemoOrbit(azimuth: 0, elevation: atan(0.12))
 
     init(view: MTKView, source: PointCloudSource) throws {
         guard let device = view.device ?? MTLCreateSystemDefaultDevice() else {
@@ -106,14 +111,13 @@ final class PointCloudRenderer: NSObject, MTKViewDelegate {
 
         super.init()
 
-        let cacheStatus = CVMetalTextureCacheCreate(nil, nil, device, nil, &textureCache)
-        // A renderer without a texture cache can never produce a depth texture.
-        // Failing here beats existing in a state that silently renders nothing.
-        guard cacheStatus == kCVReturnSuccess, textureCache != nil else {
-            throw MetalVisualError.textureCacheUnavailable(status: cacheStatus)
+        if Self.requiresTextureCache(for: resolved) {
+            let cacheStatus = CVMetalTextureCacheCreate(nil, nil, device, nil, &textureCache)
+            guard cacheStatus == kCVReturnSuccess, textureCache != nil else {
+                throw MetalVisualError.textureCacheUnavailable(status: cacheStatus)
+            }
         }
-        // Deliberately does not start an AR session here. The camera must not
-        // open until the view is actually active; setActive(true) starts it.
+        // setActive(true) starts the camera only when the view is active.
     }
 
     deinit {
@@ -142,9 +146,12 @@ final class PointCloudRenderer: NSObject, MTKViewDelegate {
         setActive(false)
     }
 
-    /// Idempotent. SwiftUI's `updateUIView` runs on every state change — moving
-    /// the depth slider, a progress tick — and re-running an AR configuration
-    /// each time restarts tracking for no reason. Only a real transition acts.
+    func updateDemoOrbit(translation: SIMD2<Float>) {
+        guard source == .demo else { return }
+        demoOrbit = Self.updatedDemoOrbit(demoOrbit, translation: translation)
+    }
+
+    /// Starts or pauses live capture only when activity changes.
     func setActive(_ active: Bool) {
         guard active != isActive else { return }
         isActive = active
@@ -165,13 +172,7 @@ final class PointCloudRenderer: NSObject, MTKViewDelegate {
     /// A Metal texture together with the Core Video wrapper that owns its
     /// backing IOSurface.
     ///
-    /// `CVMetalTextureCacheCreateTextureFromImage` documents that a strong
-    /// reference to the image buffer or the Core Video texture must be held
-    /// until Metal rendering completes, and suggests a command-buffer handler
-    /// for the purpose. Dropping the `CVMetalTexture` at the end of the
-    /// creating function — which is what this renderer used to do — lets the
-    /// surface be recycled while the GPU is still reading it. The failure is
-    /// intermittent and device-specific, which is the worst kind.
+    /// The Core Video wrapper must stay alive while Metal reads its IOSurface.
     private struct TextureBinding {
         let cvTexture: CVMetalTexture
         let texture: MTLTexture
@@ -245,9 +246,7 @@ final class PointCloudRenderer: NSObject, MTKViewDelegate {
 
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
         viewportSize = size
-        // ARKit's projectionMatrix(for:viewportSize:...) documents its viewport
-        // in points, not render pixels. The aspect ratio happens to match, but
-        // passing the documented unit costs nothing and removes the trap.
+        // ARKit projection uses viewport points, not drawable pixels.
         viewportPointSize = view.bounds.size
         // A rotation can change the drawable without SwiftUI re-running
         // updateUIView, so the projection would otherwise use a stale orientation.
@@ -271,7 +270,7 @@ final class PointCloudRenderer: NSObject, MTKViewDelegate {
         // no new depth data still costs a present.
         var liveFrame: LiveFrame?
         if source == .live {
-            guard let prepared = prepareLiveFrame() else { return }
+            guard let prepared = prepareSignpostedLiveFrame() else { return }
             liveFrame = prepared
         }
 
@@ -287,11 +286,8 @@ final class PointCloudRenderer: NSObject, MTKViewDelegate {
         encoder.setRenderPipelineState(pipeline)
 
         if let liveFrame {
-            encodeLive(encoder: encoder, frame: liveFrame, time: time)
-            // Hold the Core Video wrappers until the GPU is finished with them.
-            // withExtendedLifetime is what keeps ARC from releasing the binding
-            // at the end of this scope; waitUntilCompleted would also work and
-            // would also stall the CPU on every frame, so it is not used.
+            encodeLive(encoder: encoder, frame: liveFrame)
+            // Keep the Core Video wrappers alive until GPU completion.
             let retained = liveFrame.retainedTextures
             commandBuffer.addCompletedHandler { _ in
                 withExtendedLifetime(retained) {}
@@ -361,6 +357,12 @@ final class PointCloudRenderer: NSObject, MTKViewDelegate {
 
     /// Validates the current AR frame and builds its GPU inputs, or returns nil
     /// if there is nothing new or nothing usable to draw.
+    private func prepareSignpostedLiveFrame() -> LiveFrame? {
+        let signpost = MetalVisualLog.signposter.beginInterval("AR frame preparation")
+        defer { MetalVisualLog.signposter.endInterval("AR frame preparation", signpost) }
+        return prepareLiveFrame()
+    }
+
     private func prepareLiveFrame() -> LiveFrame? {
         guard
             let frame = session?.currentFrame,
@@ -387,8 +389,27 @@ final class PointCloudRenderer: NSObject, MTKViewDelegate {
             retained.append(retainedTexture)
         }
 
-        let orientation = interfaceOrientation
-        let camera = frame.camera
+        let uniforms = makeLiveUniforms(
+            camera: frame.camera,
+            depthTexture: depthBinding.texture,
+            orientation: interfaceOrientation
+        )
+
+        return LiveFrame(
+            timestamp: frame.timestamp,
+            uniforms: uniforms,
+            depthTexture: depthBinding.texture,
+            confidenceTexture: confidence.texture,
+            vertexCount: depthBinding.texture.width * depthBinding.texture.height,
+            retainedTextures: retained
+        )
+    }
+
+    private func makeLiveUniforms(
+        camera: ARCamera,
+        depthTexture: MTLTexture,
+        orientation: UIInterfaceOrientation
+    ) -> CloudUniforms {
         let projection = camera.projectionMatrix(
             for: orientation,
             viewportSize: viewportPointSize == .zero ? viewportSize : viewportPointSize,
@@ -405,28 +426,25 @@ final class PointCloudRenderer: NSObject, MTKViewDelegate {
             Float(camera.imageResolution.height)
         )
         uniforms.gridResolution = SIMD2(
-            Float(depthBinding.texture.width),
-            Float(depthBinding.texture.height)
+            Float(depthTexture.width),
+            Float(depthTexture.height)
         )
-        uniforms.pointSize = pointSize
+        uniforms.pointSize = Self.drawablePointSize(
+            livePointSize,
+            drawableSize: viewportSize,
+            viewportPointSize: viewportPointSize
+        )
         uniforms.maxDepth = maxDepth
-        uniforms.time = Float(simulationTime)
-
-        return LiveFrame(
-            timestamp: frame.timestamp,
-            uniforms: uniforms,
-            depthTexture: depthBinding.texture,
-            confidenceTexture: confidence.texture,
-            vertexCount: depthBinding.texture.width * depthBinding.texture.height,
-            retainedTextures: retained
-        )
+        return uniforms
     }
 
     private func encodeLive(
         encoder: MTLRenderCommandEncoder,
-        frame: LiveFrame,
-        time: Float
+        frame: LiveFrame
     ) {
+        let signpost = MetalVisualLog.signposter.beginInterval("Point cloud render encode")
+        defer { MetalVisualLog.signposter.endInterval("Point cloud render encode", signpost) }
+
         var uniforms = frame.uniforms
         encoder.setVertexBytes(&uniforms, length: MemoryLayout<CloudUniforms>.stride, index: 0)
         encoder.setVertexTexture(frame.depthTexture, index: 0)
@@ -436,14 +454,35 @@ final class PointCloudRenderer: NSObject, MTKViewDelegate {
 
     private func encodeDemo(encoder: MTLRenderCommandEncoder, time: Float) {
         let aspect = Float(max(viewportSize.width, 1) / max(viewportSize.height, 1))
-        let projection = Self.perspective(fovY: .pi / 3.2, aspect: aspect, near: 0.05, far: 50)
-        let view = Self.lookAt(eye: SIMD3(0, 0.35, 2.9), center: .zero, up: SIMD3(0, 1, 0))
+        let fovY: Float = .pi / 3.2
+        let projection = Self.perspective(fovY: fovY, aspect: aspect, near: 0.05, far: 50)
+        let distance = Self.demoCameraDistance(
+            aspect: aspect,
+            fovY: fovY,
+            sphereRadius: 1.15,
+            margin: 1.18
+        )
+        let cosElevation = cos(demoOrbit.elevation)
+        let eye = SIMD3<Float>(
+            sin(demoOrbit.azimuth) * cosElevation * distance,
+            sin(demoOrbit.elevation) * distance,
+            cos(demoOrbit.azimuth) * cosElevation * distance
+        )
+        let view = Self.lookAt(eye: eye, center: .zero, up: SIMD3(0, 1, 0))
+        let spritePixels = Self.drawablePointSize(
+            demoPointSize,
+            drawableSize: viewportSize,
+            viewportPointSize: viewportPointSize
+        )
 
         var uniforms = DemoUniforms()
         uniforms.viewProjection = projection * view
+        uniforms.cameraPosition = eye
         uniforms.time = time
         uniforms.pointCount = Float(demoPointCount)
-        uniforms.pointSize = 60
+        // The shader divides by clip-space w. Pre-multiplying by the fitted
+        // camera distance preserves the intended on-screen point size.
+        uniforms.pointSize = spritePixels * distance
         uniforms.motionScale = motionScale
 
         encoder.setVertexBytes(&uniforms, length: MemoryLayout<DemoUniforms>.stride, index: 0)

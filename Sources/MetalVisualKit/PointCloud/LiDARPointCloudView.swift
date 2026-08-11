@@ -29,16 +29,55 @@ struct PointCloudMetalView: UIViewRepresentable {
     var reduceMotion: Bool
     var isActive: Bool
 
-    final class Coordinator {
+    static func shouldRenderContinuously(
+        source: PointCloudSource,
+        isActive: Bool,
+        reduceMotion: Bool
+    ) -> Bool {
+        isActive && !(source == .demo && reduceMotion)
+    }
+
+    final class Coordinator: NSObject {
         var renderer: PointCloudRenderer?
+
+        @objc func handlePan(_ gesture: UIPanGestureRecognizer) {
+            guard gesture.state == .began || gesture.state == .changed,
+                  let view = gesture.view as? MTKView
+            else { return }
+            let delta = gesture.translation(in: view)
+            gesture.setTranslation(.zero, in: view)
+            renderer?.updateDemoOrbit(
+                translation: SIMD2(Float(delta.x), Float(delta.y))
+            )
+            if view.isPaused {
+                view.setNeedsDisplay()
+            }
+        }
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeUIView(context: Context) -> MTKView {
         let view = MTKView(frame: .zero, device: MTLCreateSystemDefaultDevice())
+        view.addGestureRecognizer(
+            UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePan))
+        )
         attachRenderer(to: view, coordinator: context.coordinator)
         return view
+    }
+
+    private func configureDrawingMode(_ view: MTKView, source: PointCloudSource) {
+        let continuous = Self.shouldRenderContinuously(
+            source: source,
+            isActive: isActive,
+            reduceMotion: reduceMotion
+        )
+        view.enableSetNeedsDisplay = !continuous
+        view.isPaused = !continuous
+        view.gestureRecognizers?.forEach { $0.isEnabled = source == .demo }
+        if isActive && !continuous {
+            view.setNeedsDisplay()
+        }
     }
 
     /// Builds a renderer for the current source and attaches it, tearing down
@@ -55,9 +94,9 @@ struct PointCloudMetalView: UIViewRepresentable {
             renderer.maxDepth = maxDepth.clamped(to: PointCloudMetalView.depthRange)
             renderer.motionScale = reduceMotion ? 0 : 1
             renderer.setActive(isActive)
-            view.isPaused = !isActive
             view.delegate = renderer
             coordinator.renderer = renderer
+            configureDrawingMode(view, source: renderer.source)
         } catch {
             MetalVisualLog.renderer.error(
                 "PointCloudRenderer failed to initialise: \(String(describing: error), privacy: .public)"
@@ -89,8 +128,8 @@ struct PointCloudMetalView: UIViewRepresentable {
         // Releasing the camera when the scene leaves the foreground is not
         // optional for an ARSession — it keeps running otherwise. setActive is
         // idempotent, so this does nothing on an ordinary state change.
-        uiView.isPaused = !isActive
         renderer?.setActive(isActive)
+        configureDrawingMode(uiView, source: renderer?.source ?? source)
     }
 
     static func dismantleUIView(_ uiView: MTKView, coordinator: Coordinator) {
@@ -101,6 +140,11 @@ struct PointCloudMetalView: UIViewRepresentable {
 }
 
 // MARK: - Public component
+
+struct CameraTaskKey: Equatable {
+    let mode: LiDARPointCloudView.DisplayMode
+    let phase: ScenePhase
+}
 
 /// A live 3D visualisation of the LiDAR depth map.
 ///
@@ -124,7 +168,7 @@ struct PointCloudMetalView: UIViewRepresentable {
 public struct LiDARPointCloudView: View {
 
     /// Which source the view should draw from.
-    public enum DisplayMode: Sendable {
+    public enum DisplayMode: Equatable, Sendable {
         /// Live LiDAR depth, falling back to ``demo`` when unavailable.
         case live
         /// Procedural cloud. Always available.
@@ -163,7 +207,7 @@ public struct LiDARPointCloudView: View {
     private var fallbackReason: String? {
         guard displayMode == .live, !isLive else { return nil }
         if !Self.isLiDARAvailable {
-            return "No LiDAR scanner on this device — showing the demo cloud."
+            return "No LiDAR scanner. Showing the demo cloud."
         }
         switch cameraState {
         case .usageDescriptionMissing:
@@ -196,11 +240,13 @@ public struct LiDARPointCloudView: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(Text(isLive ? "Live depth point cloud" : "Demo point cloud"))
-        .task(id: scenePhase) {
+        .task(id: CameraTaskKey(mode: displayMode, phase: scenePhase)) {
             // Re-checked on every foreground: the user may have changed the
             // setting in Settings and come back.
             guard displayMode == .live, scenePhase == .active else { return }
-            cameraState = await CameraAccess.request()
+            let requestedState = await CameraAccess.request()
+            guard !Task.isCancelled else { return }
+            cameraState = requestedState
         }
     }
 
@@ -208,10 +254,13 @@ public struct LiDARPointCloudView: View {
     private var controls: some View {
         VStack(spacing: 10) {
             if let fallbackReason {
-                Label(fallbackReason, systemImage: "info.circle")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.7))
-                    .multilineTextAlignment(.center)
+                VStack(spacing: 5) {
+                    Label(fallbackReason, systemImage: "info.circle")
+                    Label("Drag to orbit", systemImage: "hand.draw")
+                }
+                .font(.caption)
+                .foregroundStyle(.white.opacity(0.72))
+                .multilineTextAlignment(.center)
             }
 
             if isLive {

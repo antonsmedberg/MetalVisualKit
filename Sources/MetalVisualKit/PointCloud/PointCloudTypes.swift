@@ -23,14 +23,14 @@ struct CloudUniforms {
     var gridResolution: SIMD2<Float> = .zero
     var pointSize: Float = 8
     var maxDepth: Float = 5
-    var time: Float = 0
     /// Raw `ARConfidenceLevel`. 1 keeps medium and high, discarding low.
     var minConfidence: Float = 1
 }
 
-/// stride 80, align 16
+/// stride 96, align 16
 struct DemoUniforms {
     var viewProjection: simd_float4x4 = matrix_identity_float4x4
+    var cameraPosition: SIMD3<Float> = SIMD3(0, 0, 3)
     var time: Float = 0
     var pointCount: Float = 24_000
     var pointSize: Float = 60
