@@ -2,7 +2,9 @@
 
 `loader-simulator.png` is the verified iOS 26.5 simulator frame used in the root
 README. It demonstrates the particle renderer only and is not evidence of LiDAR
-hardware behaviour.
+hardware behaviour. The committed frame is rebuilt from the demo workspace,
+launched with `--demo-progress=0.68` at the default Large content size and captured
+with a deterministic 09:41 status bar before being resized to 644 × 1400 px.
 
 Future device recordings belong here:
 

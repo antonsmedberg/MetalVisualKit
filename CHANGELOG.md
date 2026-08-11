@@ -165,4 +165,5 @@ claim yet.
   with an existing repository and confusion with Apple's MetalFX framework.
 - Replaced third-party Turbo polynomial coefficients with a project-specific
   depth palette and documented the Apple sample-code attribution separately.
-- Added a custom particle-orbit app icon and a verified simulator screenshot.
+- Added a reproducible, opaque particle-halo and point-cloud app icon plus a
+  verified simulator screenshot of the current loader demo.

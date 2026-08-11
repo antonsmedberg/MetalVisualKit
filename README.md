@@ -194,9 +194,10 @@ When the advisory build has no concurrency diagnostics, change
 ```
 make build     # build for the iOS simulator
 make test      # pipeline, layout, lifecycle, projection and compute tests
-make parity    # layouts + simulator selector + Xcode workspace checks
+make parity    # layouts + shaders + media + simulator/workspace checks
 make demo      # build the committed workspace and example app
 make project   # regenerate the project after editing project.yml
+make icon      # regenerate the opaque example-app icon
 make lint      # SwiftLint
 make docs      # DocC archive
 ```

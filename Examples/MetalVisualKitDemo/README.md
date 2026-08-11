@@ -46,6 +46,10 @@ committed so a clean clone opens without setup. `project.yml` remains the source
 of truth. After changing it, run `make project` from the repository root and
 commit the regenerated files.
 
+The text-free app icon is generated locally with Core Graphics. Run `make icon`
+from the repository root after changing `Scripts/generate-app-icon.swift`, then
+build the demo to validate the asset catalogue.
+
 ## Troubleshooting
 
 1. Confirm the active document is `MetalVisualKit.xcworkspace` and the scheme is

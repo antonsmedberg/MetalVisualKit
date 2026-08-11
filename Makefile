@@ -5,6 +5,7 @@
 #   make parity    check layouts, simulator selection and Xcode integration
 #   make demo      build the committed example app workspace
 #   make project   regenerate the example app project with XcodeGen
+#   make icon      regenerate the opaque 1024 px example-app icon
 #   make lint      run SwiftLint
 #   make docs      build the DocC archive
 #   make gif       convert a screen recording to a README-sized GIF
@@ -16,7 +17,7 @@ DESTINATION ?= $(shell python3 Scripts/select-ios-simulator.py 2>/dev/null || \
 	echo 'generic/platform=iOS Simulator')
 SCHEME      ?= MetalVisualKit
 
-.PHONY: all build test parity demo project lint swift6 docs gif clean
+.PHONY: all build test parity demo project icon lint swift6 docs gif clean
 
 all: parity build test
 
@@ -29,6 +30,8 @@ test:
 parity:
 	python3 Scripts/check-struct-parity.py
 	python3 Scripts/check-shader-safety.py
+	python3 Scripts/check-media.py
+	python3 Scripts/test-media-check.py
 	python3 Scripts/test-simulator-selection.py
 	python3 Scripts/check-xcode-integration.py
 
@@ -39,6 +42,9 @@ demo:
 
 project:
 	cd Examples/MetalVisualKitDemo && xcodegen generate
+
+icon:
+	swift Scripts/generate-app-icon.swift
 
 lint:
 	swiftlint lint --strict
