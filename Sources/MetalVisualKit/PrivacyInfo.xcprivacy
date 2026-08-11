@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	    MetalVisualKit collects nothing and tracks nobody. It performs no
+	    networking, writes no UserDefaults, reads no file timestamps or disk
+	    space, and uses no required-reason APIs.
+
+	    Camera access is deliberately not declared here: the package never
+	    requests it on its own behalf. The consuming app owns that decision
+	    and must supply NSCameraUsageDescription in its own Info.plist.
+	-->
+	<key>NSPrivacyTracking</key>
+	<false/>
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array/>
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array/>
+</dict>
+</plist>

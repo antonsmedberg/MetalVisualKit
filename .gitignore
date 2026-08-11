@@ -1,0 +1,29 @@
+.DS_Store
+*.xcuserdatad/
+xcuserdata/
+*.xcscmblueprint
+*.xccheckout
+.build/
+.swiftpm/
+DerivedData/
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+Packages/
+Package.resolved
+.netrc
+*.pbxuser
+!default.pbxuser
+*.perspectivev3
+!default.perspectivev3
+
+# Screen recordings kept out of the repo; only the exported GIFs are committed
+*.mov
+
+# Python bytecode from the helper scripts
+__pycache__/
+*.pyc
+
+Package.swift.bak

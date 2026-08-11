@@ -1,0 +1,41 @@
+# Deliberately small. Rules that catch real problems in a Metal codebase,
+# not style rules that generate noise in shader-adjacent Swift.
+
+included:
+  - Sources
+  - Tests
+
+excluded:
+  - .build
+  - Examples
+
+disabled_rules:
+  - todo                    # TODOs in this repo are tracked deliberately
+  - identifier_name         # short vector/matrix names are idiomatic in GPU code
+
+opt_in_rules:
+  - array_init
+  - closure_spacing
+  - collection_alignment
+  - empty_count
+  - explicit_init
+  - first_where
+  - force_unwrapping
+  - implicitly_unwrapped_optional
+  - last_where
+  - redundant_nil_coalescing
+  - toggle_bool
+  - unneeded_parentheses_in_closure_argument
+
+line_length:
+  warning: 120
+  error: 160
+  ignores_comments: true
+
+type_body_length:
+  warning: 400
+  error: 600
+
+file_length:
+  warning: 500
+  error: 800
