@@ -82,83 +82,100 @@ private struct LoaderTab: View {
         dynamicTypeSize.isAccessibilitySize ? 240 : 310
     }
 
-    var body: some View {
-        ZStack {
-            background.ignoresSafeArea()
-
-            VStack(spacing: dynamicTypeSize.isAccessibilitySize ? 12 : 22) {
-                VStack(spacing: 6) {
-                    Text("Particle loader")
-                        .font(.title2.weight(.semibold))
-                    Text("Determinate and indeterminate states")
-                        .font(.subheadline)
-                        .foregroundStyle(labelColor.opacity(0.55))
-                        .multilineTextAlignment(.center)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .foregroundStyle(labelColor)
-
-                Picker("Loader mode", selection: $mode) {
-                    ForEach(LoaderMode.allCases) { mode in
-                        Text(mode.rawValue).tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .frame(maxWidth: 280)
-
-                Group {
-                    if mode == .progress {
-                        ParticleProgressView(
-                            progress: progress,
-                            title: "Exporting",
-                            isInteractive: true,
-                            surfaceStyle: surfaceStyle,
-                            labelColor: labelColor
-                        )
-                    } else {
-                        ParticleSpinnerView(
-                            label: "Preparing export",
-                            surfaceStyle: surfaceStyle
-                        )
-                    }
-                }
-                .frame(width: loaderSize, height: loaderSize)
-
-                Text(mode == .progress
-                     ? "Drag across the ring to disturb the particles."
-                     : "Use the spinner when duration is unknown.")
-                    .font(.footnote)
+    private var content: some View {
+        VStack(spacing: dynamicTypeSize.isAccessibilitySize ? 12 : 22) {
+            VStack(spacing: 6) {
+                Text("Particle loader")
+                    .font(.title2.weight(.semibold))
+                Text("Determinate and indeterminate states")
+                    .font(.subheadline)
                     .foregroundStyle(labelColor.opacity(0.55))
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+            .foregroundStyle(labelColor)
 
-                HStack(spacing: 12) {
-                    if mode == .progress {
-                        Button(isRunning ? "Running…" : "Simulate export") {
-                            isRunning = true
-                            progress = 0
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(usesLightSurface ? .indigo : .white.opacity(0.16))
-                        .disabled(isRunning)
-                    }
-
-                    Button {
-                        usesLightSurface.toggle()
-                    } label: {
-                        Label(
-                            usesLightSurface ? "Dark surface" : "Light surface",
-                            systemImage: usesLightSurface ? "moon.fill" : "sun.max.fill"
-                        )
-                        .labelStyle(.iconOnly)
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(labelColor.opacity(0.8))
+            Picker("Loader mode", selection: $mode) {
+                ForEach(LoaderMode.allCases) { mode in
+                    Text(mode.rawValue).tag(mode)
                 }
             }
-            .padding(.horizontal, 24)
+            .pickerStyle(.segmented)
+            .frame(maxWidth: 280)
+
+            Group {
+                if mode == .progress {
+                    ParticleProgressView(
+                        progress: progress,
+                        title: "Exporting",
+                        isInteractive: true,
+                        surfaceStyle: surfaceStyle,
+                        labelColor: labelColor
+                    )
+                } else {
+                    ParticleSpinnerView(
+                        label: "Preparing export",
+                        surfaceStyle: surfaceStyle
+                    )
+                }
+            }
+            .frame(width: loaderSize, height: loaderSize)
+
+            Text(mode == .progress
+                 ? "Drag across the ring to disturb the particles."
+                 : "Use the spinner when duration is unknown.")
+                .font(.footnote)
+                .foregroundStyle(labelColor.opacity(0.55))
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 12) {
+                if mode == .progress {
+                    Button(isRunning ? "Running…" : "Simulate export") {
+                        isRunning = true
+                        progress = 0
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(usesLightSurface ? .indigo : .white.opacity(0.16))
+                    .disabled(isRunning)
+                }
+
+                Button {
+                    usesLightSurface.toggle()
+                } label: {
+                    Label(
+                        usesLightSurface ? "Dark surface" : "Light surface",
+                        systemImage: usesLightSurface ? "moon.fill" : "sun.max.fill"
+                    )
+                    .labelStyle(.iconOnly)
+                }
+                .buttonStyle(.bordered)
+                .tint(labelColor.opacity(0.8))
+            }
+        }
+    }
+
+    var body: some View {
+        ZStack {
+            background.ignoresSafeArea()
+
+            GeometryReader { geometry in
+                ViewThatFits(in: .vertical) {
+                    content
+                        .padding(.horizontal, 24)
+                        .frame(maxWidth: .infinity, minHeight: geometry.size.height)
+
+                    ScrollView {
+                        content
+                            .padding(.horizontal, 24)
+                            .padding(.vertical, 16)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .scrollIndicators(.hidden)
+                }
+            }
         }
         .animation(.smooth(duration: 0.30), value: usesLightSurface)
         .task(id: isRunning) {
@@ -190,7 +207,7 @@ private struct LoaderTab: View {
 
 private struct CloudTab: View {
     var body: some View {
-        LiDARPointCloudView(displayMode: .live)
+        LiDARPointCloudView(displayMode: .live, allowsOrbitInteraction: true)
             .ignoresSafeArea(edges: [.top, .horizontal])
     }
 }

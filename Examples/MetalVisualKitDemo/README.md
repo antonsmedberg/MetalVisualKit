@@ -25,7 +25,8 @@ The app depends on the package by relative path (`../..`). Xcode therefore shows
 The loader tab exposes determinate and indeterminate variants plus explicit
 light- and dark-surface previews. The LiDAR tab uses live scene depth when the
 hardware and permission are available, otherwise it presents the orbitable
-procedural cloud with an on-screen reason.
+procedural cloud with an on-screen reason. The demo opts in to orbit explicitly;
+the package default leaves fallback gestures disabled for safe embedding.
 
 The demo accepts deterministic launch arguments for screenshot and regression
 work: `--demo-progress=0.68`, `--demo-spinner`, `--demo-light`, and

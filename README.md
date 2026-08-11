@@ -93,14 +93,15 @@ ParticleProgressView(
 ParticleSpinnerView()
     .frame(width: 240, height: 240)
 
-// Live depth, with automatic fallback to the demo cloud
-LiDARPointCloudView(displayMode: .live)
+// Live depth, with automatic fallback and explicitly enabled demo orbit
+LiDARPointCloudView(displayMode: .live, allowsOrbitInteraction: true)
 ```
 
-The loader draws on a transparent drawable with premultiplied source-over
-compositing, so it can sit above video thumbnails, blurred surfaces or other
-content. `.automatic` follows the system colour scheme. Use `.light` or `.dark`
-when the host surface differs, and optionally set `labelColor` for the centre text.
+The loader draws on a transparent drawable. Dark surfaces use additive glow;
+light surfaces use premultiplied source-over compositing so particles retain
+contrast over bright content. `.automatic` follows the system colour scheme. Use
+`.light` or `.dark` when the host surface differs, and optionally set `labelColor`
+for the centre text.
 
 ## Architecture
 
@@ -128,7 +129,9 @@ Both components respect **Reduce Motion**. It freezes decorative particle motion
 and procedural cloud animation while leaving progress and camera-driven geometry
 intact. Settled particle and procedural demo views switch to on-demand drawing
 instead of redrawing static frames. Both components expose accessibility labels;
-the loader also publishes its percentage to VoiceOver.
+the loader also publishes its percentage to VoiceOver. When procedural orbit is
+enabled, the cloud exposes named VoiceOver actions for rotating left, right, up
+and down.
 
 ## Current rendering defaults
 
@@ -153,6 +156,8 @@ the loader also publishes its percentage to VoiceOver.
 - Live depth requires a device with a LiDAR scanner. Without one, and in the
   simulator, `LiDARPointCloudView` falls back to a procedural Fibonacci-sphere
   cloud, so previews and the demo app still show something real.
+- Procedural orbit is opt-in through `allowsOrbitInteraction` so automatic
+  fallback does not compete with gestures owned by a host view.
 - The host app must declare `NSCameraUsageDescription` for live mode.
 
 ## Swift 6 migration

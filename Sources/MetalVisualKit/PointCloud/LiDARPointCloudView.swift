@@ -28,6 +28,14 @@ struct PointCloudMetalView: UIViewRepresentable {
     var maxDepth: Float
     var reduceMotion: Bool
     var isActive: Bool
+    var allowsOrbitInteraction: Bool
+
+    enum OrbitAccessibilityDirection {
+        case left
+        case right
+        case up
+        case down
+    }
 
     static func shouldRenderContinuously(
         source: PointCloudSource,
@@ -37,8 +45,38 @@ struct PointCloudMetalView: UIViewRepresentable {
         isActive && !(source == .demo && reduceMotion)
     }
 
+    static func shouldEnableOrbit(
+        source: PointCloudSource,
+        allowsOrbitInteraction: Bool
+    ) -> Bool {
+        source == .demo && allowsOrbitInteraction
+    }
+
+    static func accessibilityTranslation(
+        for direction: OrbitAccessibilityDirection
+    ) -> SIMD2<Float> {
+        switch direction {
+        case .left: return SIMD2(-48, 0)
+        case .right: return SIMD2(48, 0)
+        case .up: return SIMD2(0, -48)
+        case .down: return SIMD2(0, 48)
+        }
+    }
+
+    @MainActor
     final class Coordinator: NSObject {
         var renderer: PointCloudRenderer?
+        weak var view: MTKView?
+
+        @discardableResult
+        private func updateOrbit(translation: SIMD2<Float>) -> Bool {
+            guard let renderer, let view else { return false }
+            renderer.updateDemoOrbit(translation: translation)
+            if view.isPaused {
+                view.setNeedsDisplay()
+            }
+            return true
+        }
 
         @objc func handlePan(_ gesture: UIPanGestureRecognizer) {
             guard gesture.state == .began || gesture.state == .changed,
@@ -46,12 +84,50 @@ struct PointCloudMetalView: UIViewRepresentable {
             else { return }
             let delta = gesture.translation(in: view)
             gesture.setTranslation(.zero, in: view)
-            renderer?.updateDemoOrbit(
+            updateOrbit(
                 translation: SIMD2(Float(delta.x), Float(delta.y))
             )
-            if view.isPaused {
-                view.setNeedsDisplay()
-            }
+        }
+
+        @objc func rotateLeft() -> Bool {
+            updateOrbit(translation: PointCloudMetalView.accessibilityTranslation(for: .left))
+        }
+
+        @objc func rotateRight() -> Bool {
+            updateOrbit(translation: PointCloudMetalView.accessibilityTranslation(for: .right))
+        }
+
+        @objc func rotateUp() -> Bool {
+            updateOrbit(translation: PointCloudMetalView.accessibilityTranslation(for: .up))
+        }
+
+        @objc func rotateDown() -> Bool {
+            updateOrbit(translation: PointCloudMetalView.accessibilityTranslation(for: .down))
+        }
+
+        var accessibilityActions: [UIAccessibilityCustomAction] {
+            [
+                UIAccessibilityCustomAction(
+                    name: "Rotate left",
+                    target: self,
+                    selector: #selector(rotateLeft)
+                ),
+                UIAccessibilityCustomAction(
+                    name: "Rotate right",
+                    target: self,
+                    selector: #selector(rotateRight)
+                ),
+                UIAccessibilityCustomAction(
+                    name: "Rotate up",
+                    target: self,
+                    selector: #selector(rotateUp)
+                ),
+                UIAccessibilityCustomAction(
+                    name: "Rotate down",
+                    target: self,
+                    selector: #selector(rotateDown)
+                )
+            ]
         }
     }
 
@@ -59,6 +135,7 @@ struct PointCloudMetalView: UIViewRepresentable {
 
     func makeUIView(context: Context) -> MTKView {
         let view = MTKView(frame: .zero, device: MTLCreateSystemDefaultDevice())
+        context.coordinator.view = view
         view.addGestureRecognizer(
             UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePan))
         )
@@ -66,7 +143,11 @@ struct PointCloudMetalView: UIViewRepresentable {
         return view
     }
 
-    private func configureDrawingMode(_ view: MTKView, source: PointCloudSource) {
+    private func configureDrawingMode(
+        _ view: MTKView,
+        source: PointCloudSource,
+        coordinator: Coordinator
+    ) {
         let continuous = Self.shouldRenderContinuously(
             source: source,
             isActive: isActive,
@@ -74,7 +155,17 @@ struct PointCloudMetalView: UIViewRepresentable {
         )
         view.enableSetNeedsDisplay = !continuous
         view.isPaused = !continuous
-        view.gestureRecognizers?.forEach { $0.isEnabled = source == .demo }
+        let orbitEnabled = Self.shouldEnableOrbit(
+            source: source,
+            allowsOrbitInteraction: allowsOrbitInteraction
+        )
+        view.gestureRecognizers?.forEach { $0.isEnabled = orbitEnabled }
+        view.isAccessibilityElement = true
+        view.accessibilityLabel = source == .live ? "Live depth point cloud" : "Demo point cloud"
+        view.accessibilityHint = orbitEnabled
+            ? "Use the custom actions to rotate the cloud."
+            : nil
+        view.accessibilityCustomActions = orbitEnabled ? coordinator.accessibilityActions : nil
         if isActive && !continuous {
             view.setNeedsDisplay()
         }
@@ -96,7 +187,7 @@ struct PointCloudMetalView: UIViewRepresentable {
             renderer.setActive(isActive)
             view.delegate = renderer
             coordinator.renderer = renderer
-            configureDrawingMode(view, source: renderer.source)
+            configureDrawingMode(view, source: renderer.source, coordinator: coordinator)
         } catch {
             MetalVisualLog.renderer.error(
                 "PointCloudRenderer failed to initialise: \(String(describing: error), privacy: .public)"
@@ -129,13 +220,19 @@ struct PointCloudMetalView: UIViewRepresentable {
         // optional for an ARSession — it keeps running otherwise. setActive is
         // idempotent, so this does nothing on an ordinary state change.
         renderer?.setActive(isActive)
-        configureDrawingMode(uiView, source: renderer?.source ?? source)
+        configureDrawingMode(
+            uiView,
+            source: renderer?.source ?? source,
+            coordinator: context.coordinator
+        )
     }
 
     static func dismantleUIView(_ uiView: MTKView, coordinator: Coordinator) {
         coordinator.renderer?.pause()
+        coordinator.view = nil
         uiView.isPaused = true
         uiView.delegate = nil
+        uiView.accessibilityCustomActions = nil
     }
 }
 
@@ -180,6 +277,7 @@ public struct LiDARPointCloudView: View {
 
     private let displayMode: DisplayMode
     private let showsControls: Bool
+    private let allowsOrbitInteraction: Bool
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
@@ -193,9 +291,17 @@ public struct LiDARPointCloudView: View {
     /// - Parameters:
     ///   - displayMode: Source to draw from. Defaults to ``DisplayMode/live``.
     ///   - showsControls: Whether to overlay the depth-range slider.
-    public init(displayMode: DisplayMode = .live, showsControls: Bool = true) {
+    ///   - allowsOrbitInteraction: Whether the procedural cloud accepts pan and
+    ///     VoiceOver rotation actions. Defaults to `false` so fallback does not
+    ///     compete with gestures owned by a host view.
+    public init(
+        displayMode: DisplayMode = .live,
+        showsControls: Bool = true,
+        allowsOrbitInteraction: Bool = false
+    ) {
         self.displayMode = displayMode
         self.showsControls = showsControls
+        self.allowsOrbitInteraction = allowsOrbitInteraction
     }
 
     private var isLive: Bool {
@@ -231,7 +337,8 @@ public struct LiDARPointCloudView: View {
                 source: source,
                 maxDepth: maxDepth,
                 reduceMotion: reduceMotion,
-                isActive: scenePhase == .active
+                isActive: scenePhase == .active,
+                allowsOrbitInteraction: allowsOrbitInteraction
             )
 
             if showsControls {
@@ -239,7 +346,6 @@ public struct LiDARPointCloudView: View {
             }
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(Text(isLive ? "Live depth point cloud" : "Demo point cloud"))
         .task(id: CameraTaskKey(mode: displayMode, phase: scenePhase)) {
             // Re-checked on every foreground: the user may have changed the
             // setting in Settings and come back.
@@ -256,7 +362,10 @@ public struct LiDARPointCloudView: View {
             if let fallbackReason {
                 VStack(spacing: 5) {
                     Label(fallbackReason, systemImage: "info.circle")
-                    Label("Drag to orbit", systemImage: "hand.draw")
+                    if allowsOrbitInteraction {
+                        Label("Drag to orbit", systemImage: "hand.draw")
+                            .accessibilityHidden(true)
+                    }
                 }
                 .font(.caption)
                 .foregroundStyle(.white.opacity(0.72))
@@ -266,12 +375,14 @@ public struct LiDARPointCloudView: View {
             if isLive {
                 HStack(spacing: 12) {
                     Image(systemName: "arrow.left.and.right")
+                        .accessibilityHidden(true)
                     Slider(value: $maxDepth, in: PointCloudMetalView.depthRange)
                         .accessibilityLabel(Text("Maximum scan depth"))
                         .accessibilityValue(Text(String(format: "%.1f metres", maxDepth)))
                     Text(String(format: "%.1f m", maxDepth))
                         .font(.caption.monospacedDigit())
                         .frame(width: 48, alignment: .trailing)
+                        .accessibilityHidden(true)
                 }
                 .tint(.cyan)
                 .foregroundStyle(.white)

@@ -25,10 +25,11 @@ claim yet.
   travelling waves, restrained curl variation and a readable centre.
 - `ParticleProgressView` now accepts either a value or a read-only `Binding`
   convenience while preserving the existing interactive default.
-- Added surface-aware particle palettes, optional centre-label colour and
-  premultiplied source-over compositing for light and dark host surfaces.
+- Added surface-aware particle palettes, optional centre-label colour, additive
+  dark-surface glow and premultiplied source-over light-surface compositing.
 - Reworked the procedural cloud with aspect-aware framing, camera-relative
-  shading, restrained sampling jitter and drag-to-orbit interaction.
+  shading and restrained sampling jitter. Orbit is opt-in, with pan and named
+  VoiceOver rotation actions when enabled.
 
 ### Fixed
 
@@ -98,6 +99,10 @@ claim yet.
   drive an animation the shader was suppressing.
 - The package applied `.ignoresSafeArea()` to `LiDARPointCloudView`, imposing a
   layout policy on host apps. Removed; the example app opts in.
+- Automatic procedural fallback no longer activates a pan gesture unless the
+  caller opts in, avoiding gesture competition with host scroll views.
+- The demo loader uses a scrollable compact-height fallback so landscape and
+  large Dynamic Type controls remain reachable.
 
 - The point cloud kept its original renderer when the resolved source changed.
   SwiftUI reuses the view and calls `updateUIView` rather than `makeUIView`, so
