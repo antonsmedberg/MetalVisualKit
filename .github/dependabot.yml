@@ -1,0 +1,12 @@
+version: 2
+updates:
+  # Action versions rot silently — a runner image change or a deprecated action
+  # surfaces as a red build with no code change behind it.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "ci"
+    labels:
+      - "dependencies"
