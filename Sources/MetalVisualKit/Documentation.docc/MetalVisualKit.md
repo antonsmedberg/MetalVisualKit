@@ -8,27 +8,36 @@ unprojection run on the GPU while Swift coordinates lifecycle and compact state.
 MetalVisualKit contains two components whose per-particle and per-point work runs
 on the GPU, wrapped in SwiftUI views that behave like any other view in a layout.
 
-``ParticleProgressView`` drives 1,400 particles through a Metal compute shader
-each frame — curl-noise drift, spring targeting toward a ring swept by the bound
-progress value, touch repulsion, and a completion burst — then renders them as
-additive point sprites in a single draw call. No SwiftUI view is created per
-particle; the CPU writes one 40-byte uniform struct per frame and nothing else.
+``ParticleProgressView`` drives 1,400 particles through a Metal compute shader.
+The shader updates a spring-controlled ring with coherent travelling waves,
+restrained curl variation, touch repulsion and a short completion release, then
+renders it in one draw call. Swift
+prepares compact uniform state and encodes the passes. There is no per-particle
+CPU update loop.
+
+The transparent renderer uses premultiplied source-over compositing.
+``ParticleSurfaceStyle`` follows the system colour scheme by default and also
+offers explicit light and dark palettes for custom host surfaces.
 
 ``LiDARPointCloudView`` binds the ARKit `sceneDepth` map as a texture to the
 *vertex* shader. Each of roughly 49,000 vertices samples its own depth pixel,
 unprojects through the inverse camera intrinsics, transforms to world space with
-the camera pose, and colours itself by depth. Point data never touches the CPU.
+the camera pose, and colours itself by depth. Swift validates the AR frame,
+prepares camera matrices and binds the depth and confidence textures. It does not
+read back or individually unproject depth pixels on the CPU.
 
 ### Accessibility
 
-Both components honour **Reduce Motion**: drift, rotation and the completion
-burst are scaled to zero rather than the view being replaced, so a progress value
-still reads correctly. Both expose an accessibility label and value.
+Both components honour **Reduce Motion**. The particle ring uses a static target
+without touch repulsion or a completion release, and the demo cloud stops
+rotating. Settled particle and demo views draw on demand, while progress and
+camera-driven geometry still update. Both views expose an accessibility label;
+the loader also publishes its percentage as an accessibility value.
 
 ### A note on struct layouts
 
-The uniform structs shared with the shaders are declared twice — once in Swift,
-once in Metal Shading Language — with nothing in the compiler linking them.
+The uniform structs shared with the shaders are declared once in Swift and once
+in Metal Shading Language, with nothing in the compiler linking them.
 Drift between the two produces a visual glitch rather than a build failure, so it
 is checked two ways: `Scripts/check-struct-parity.py` compares the declarations
 directly, and `PipelineTests` pins the resulting strides.
@@ -39,6 +48,7 @@ directly, and `PipelineTests` pins the resulting strides.
 
 - ``ParticleProgressView``
 - ``ParticleSpinnerView``
+- ``ParticleSurfaceStyle``
 
 ### Depth visualisation
 

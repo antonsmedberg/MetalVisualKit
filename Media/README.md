@@ -2,14 +2,14 @@
 
 `loader-simulator.png` is the verified iOS 26.5 simulator frame used in the root
 README. It demonstrates the particle renderer only and is not evidence of LiDAR
-hardware behavior.
+hardware behaviour.
 
 Future device recordings belong here:
 
 | File | Content | Target |
 |---|---|---|
-| `particle-loader.gif` | One full sweep 0 → 100% ending in the burst, with a drag across the particles mid-sweep so the repulsion is visible | ~4 s, < 5 MB |
-| `point-cloud.gif` | Slow pan across a desk or room corner, depth slider adjusted once so the colormap range shifts | ~5 s, < 5 MB |
+| `particle-loader.gif` | One full sweep 0 → 100% ending in the completion release, with a drag across the particles mid-sweep so the repulsion is visible | ~4 s, < 5 MB |
+| `point-cloud.gif` | Slow pan across a desk or room corner, depth slider adjusted once so the colour-map range shifts | ~5 s, < 5 MB |
 
 Record from the example app on device, then:
 
