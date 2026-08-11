@@ -29,6 +29,9 @@ struct PointCloudMetalView: UIViewRepresentable {
     var reduceMotion: Bool
     var isActive: Bool
     var allowsOrbitInteraction: Bool
+    var rendererFactory: @MainActor (MTKView, PointCloudSource) throws -> PointCloudRenderer = {
+        try PointCloudRenderer(view: $0, source: $1)
+    }
 
     enum OrbitAccessibilityDirection {
         case left
@@ -64,9 +67,32 @@ struct PointCloudMetalView: UIViewRepresentable {
     }
 
     @MainActor
+    static func makeOrbitGestureRecognizer(
+        target: AnyObject?,
+        action: Selector?
+    ) -> UIPanGestureRecognizer {
+        let recognizer = UIPanGestureRecognizer(target: target, action: action)
+        recognizer.isEnabled = false
+        return recognizer
+    }
+
+    @MainActor
+    static func configureOrbitGesture(
+        _ recognizer: UIPanGestureRecognizer?,
+        source: PointCloudSource,
+        allowsOrbitInteraction: Bool
+    ) {
+        recognizer?.isEnabled = shouldEnableOrbit(
+            source: source,
+            allowsOrbitInteraction: allowsOrbitInteraction
+        )
+    }
+
+    @MainActor
     final class Coordinator: NSObject {
         var renderer: PointCloudRenderer?
         weak var view: MTKView?
+        weak var orbitGestureRecognizer: UIPanGestureRecognizer?
 
         @discardableResult
         private func updateOrbit(translation: SIMD2<Float>) -> Bool {
@@ -136,14 +162,17 @@ struct PointCloudMetalView: UIViewRepresentable {
     func makeUIView(context: Context) -> MTKView {
         let view = MTKView(frame: .zero, device: MTLCreateSystemDefaultDevice())
         context.coordinator.view = view
-        view.addGestureRecognizer(
-            UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePan))
+        let orbitGestureRecognizer = Self.makeOrbitGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handlePan)
         )
+        context.coordinator.orbitGestureRecognizer = orbitGestureRecognizer
+        view.addGestureRecognizer(orbitGestureRecognizer)
         attachRenderer(to: view, coordinator: context.coordinator)
         return view
     }
 
-    private func configureDrawingMode(
+    func configureDrawingMode(
         _ view: MTKView,
         source: PointCloudSource,
         coordinator: Coordinator
@@ -159,7 +188,11 @@ struct PointCloudMetalView: UIViewRepresentable {
             source: source,
             allowsOrbitInteraction: allowsOrbitInteraction
         )
-        view.gestureRecognizers?.forEach { $0.isEnabled = orbitEnabled }
+        Self.configureOrbitGesture(
+            coordinator.orbitGestureRecognizer,
+            source: source,
+            allowsOrbitInteraction: allowsOrbitInteraction
+        )
         view.isAccessibilityElement = true
         view.accessibilityLabel = source == .live ? "Live depth point cloud" : "Demo point cloud"
         view.accessibilityHint = orbitEnabled
@@ -177,8 +210,15 @@ struct PointCloudMetalView: UIViewRepresentable {
         coordinator.renderer?.setActive(false)
         view.delegate = nil
         coordinator.renderer = nil
+        Self.configureOrbitGesture(
+            coordinator.orbitGestureRecognizer,
+            source: source,
+            allowsOrbitInteraction: false
+        )
+        view.accessibilityHint = nil
+        view.accessibilityCustomActions = nil
         do {
-            let renderer = try PointCloudRenderer(view: view, source: source)
+            let renderer = try rendererFactory(view, source)
             // Apply lifecycle state before the delegate is attached, so no
             // frame is drawn — and no AR session started — for a scene that is
             // not active yet.
@@ -189,6 +229,11 @@ struct PointCloudMetalView: UIViewRepresentable {
             coordinator.renderer = renderer
             configureDrawingMode(view, source: renderer.source, coordinator: coordinator)
         } catch {
+            Self.configureOrbitGesture(
+                coordinator.orbitGestureRecognizer,
+                source: source,
+                allowsOrbitInteraction: false
+            )
             MetalVisualLog.renderer.error(
                 "PointCloudRenderer failed to initialise: \(String(describing: error), privacy: .public)"
             )
@@ -229,6 +274,8 @@ struct PointCloudMetalView: UIViewRepresentable {
 
     static func dismantleUIView(_ uiView: MTKView, coordinator: Coordinator) {
         coordinator.renderer?.pause()
+        coordinator.orbitGestureRecognizer?.isEnabled = false
+        coordinator.orbitGestureRecognizer = nil
         coordinator.view = nil
         uiView.isPaused = true
         uiView.delegate = nil
