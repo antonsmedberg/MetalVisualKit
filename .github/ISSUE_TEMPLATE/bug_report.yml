@@ -1,0 +1,71 @@
+name: Bug report
+description: Report reproducible incorrect behaviour
+title: "bug: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a problem. Do not include credentials or private data. Report security issues through the private link in SECURITY.md.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened, and what did you expect instead?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Provide a minimal sample or numbered steps.
+      placeholder: |
+        1. Create ...
+        2. Run ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include the commit or version, Xcode, iOS, device or simulator, and relevant accessibility settings.
+      placeholder: |
+        MetalVisualKit commit:
+        Xcode:
+        iOS:
+        Device or simulator:
+        Reduce Motion / Dynamic Type:
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - Particle progress loader
+        - Particle spinner
+        - LiDAR point cloud
+        - Procedural point cloud
+        - Demo app or Xcode integration
+        - Documentation or build tooling
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Add concise logs or media after removing personal data and secrets.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Initial checks
+      options:
+        - label: I searched existing issues and pull requests.
+          required: true
+        - label: This is not a private security report.
+          required: true
+        - label: I stated whether the reproduction used a simulator, physical device, or neither.
+          required: true

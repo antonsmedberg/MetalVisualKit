@@ -1,0 +1,53 @@
+name: Feature request
+description: Propose a focused API, rendering or tooling improvement
+title: "feat: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please describe the problem before proposing an implementation. Larger changes should be agreed before a pull request is opened.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: What concrete limitation does this address?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: Describe the smallest API or behaviour change that solves the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Include workarounds or simpler approaches you considered.
+    validations:
+      required: true
+  - type: dropdown
+    id: evidence
+    attributes:
+      label: Required validation
+      options:
+        - Simulator is sufficient
+        - Physical iPhone or iPad required
+        - LiDAR hardware required
+        - Instruments profiling required
+        - Documentation or tooling only
+        - Unsure
+    validations:
+      required: true
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope checks
+      options:
+        - label: I searched existing issues and pull requests.
+          required: true
+        - label: I have not presented unverified hardware or performance behaviour as fact.
+          required: true

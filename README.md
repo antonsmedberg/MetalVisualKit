@@ -1,8 +1,9 @@
 # MetalVisualKit
 
-MetalVisualKit is my exploration of GPU-first UI on iOS: SwiftUI owns the view
-lifecycle while Metal handles the per-particle and per-point work. It contains a
-particle progress renderer and a LiDAR point cloud, both exposed as SwiftUI views.
+MetalVisualKit is an MIT-licensed Swift package exploring GPU-first UI on iOS:
+SwiftUI owns the view lifecycle while Metal handles the per-particle and
+per-point work. It contains a particle progress renderer and a LiDAR point cloud,
+both exposed as SwiftUI views.
 
 [![Build](https://github.com/antonsmedberg/MetalVisualKit/actions/workflows/build.yml/badge.svg)](https://github.com/antonsmedberg/MetalVisualKit/actions/workflows/build.yml)
 ![Platform](https://img.shields.io/badge/platform-iOS%2017%2B-lightgrey)
@@ -217,9 +218,14 @@ these intervals in Instruments before making performance claims.
 
 ## Contributing
 
-Bug reports are welcome. Please discuss larger changes in an issue first. Pull
-requests should keep Swift/MSL layouts in sync and pass `make parity`,
-`make test`, `make demo` and `make lint`.
+Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) for the Xcode
+setup, rendering invariants, verification commands and pull-request expectations.
+Use the structured issue forms for reproducible bugs and focused proposals, and
+discuss larger API or renderer changes before implementation.
+
+Please report vulnerabilities privately according to
+[SECURITY.md](SECURITY.md). Participation is governed by the
+[Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Privacy
 

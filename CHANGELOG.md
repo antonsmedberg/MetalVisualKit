@@ -167,3 +167,5 @@ claim yet.
   depth palette and documented the Apple sample-code attribution separately.
 - Added a reproducible, opaque particle-halo and point-cloud app icon plus a
   verified simulator screenshot of the current loader demo.
+- Added contributor, conduct and security policies plus structured issue and
+  pull-request templates for public collaboration.
