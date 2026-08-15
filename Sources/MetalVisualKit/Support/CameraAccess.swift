@@ -29,16 +29,26 @@ enum CameraAccess {
         Bundle.main.object(forInfoDictionaryKey: "NSCameraUsageDescription") != nil
     }
 
-    /// Read fresh every time. A cached value goes stale the moment the user
-    /// changes the setting in Settings and comes back.
-    static var current: State {
+    static func state(
+        hasUsageDescription: Bool,
+        authorizationStatus: AVAuthorizationStatus
+    ) -> State {
         guard hasUsageDescription else { return .usageDescriptionMissing }
-        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        switch authorizationStatus {
         case .authorized: return .granted
         case .notDetermined: return .notDetermined
         case .denied, .restricted: return .denied
         @unknown default: return .denied
         }
+    }
+
+    /// Read fresh every time. A cached value goes stale the moment the user
+    /// changes the setting in Settings and comes back.
+    static var current: State {
+        state(
+            hasUsageDescription: hasUsageDescription,
+            authorizationStatus: AVCaptureDevice.authorizationStatus(for: .video)
+        )
     }
 
     /// Prompts once if the user has not been asked yet. Safe to call

@@ -1,10 +1,11 @@
 # MetalVisualKit
 #
 #   make build     build the package for the iOS simulator
-#   make test      run the pipeline, layout and projection tests
-#   make parity    check the Swift <-> MSL uniform struct layouts
-#   make demo      build the committed example app project
+#   make test      run pipeline, layout, lifecycle, projection and compute tests
+#   make parity    check layouts, simulator selection and Xcode integration
+#   make demo      build the committed example app workspace
 #   make project   regenerate the example app project with XcodeGen
+#   make icon      regenerate the opaque 1024 px example-app icon
 #   make lint      run SwiftLint
 #   make docs      build the DocC archive
 #   make gif       convert a screen recording to a README-sized GIF
@@ -16,7 +17,7 @@ DESTINATION ?= $(shell python3 Scripts/select-ios-simulator.py 2>/dev/null || \
 	echo 'generic/platform=iOS Simulator')
 SCHEME      ?= MetalVisualKit
 
-.PHONY: all build test parity demo project lint swift6 docs gif clean
+.PHONY: all build test parity demo project icon lint swift6 docs gif clean
 
 all: parity build test
 
@@ -28,27 +29,38 @@ test:
 
 parity:
 	python3 Scripts/check-struct-parity.py
+	python3 Scripts/check-shader-safety.py
+	python3 Scripts/check-media.py
+	python3 Scripts/test-media-check.py
 	python3 Scripts/test-simulator-selection.py
+	python3 Scripts/check-xcode-integration.py
 
 demo:
 	xcodebuild build \
-		-project Examples/MetalVisualKitDemo/MetalVisualKitDemo.xcodeproj \
+		-workspace Examples/MetalVisualKit.xcworkspace \
 		-scheme MetalVisualKitDemo -destination "$(DESTINATION)" -quiet
 
 project:
 	cd Examples/MetalVisualKitDemo && xcodegen generate
 
+icon:
+	swift Scripts/generate-app-icon.swift
+
 lint:
 	swiftlint lint --strict
 
 # Non-blocking: lists the data-race diagnostics blocking Swift 6 language mode.
-# The manifest's swiftLanguageMode overrides the xcodebuild SWIFT_VERSION flag,
-# so the flag alone measures nothing. Patch the manifest, build, always restore
-# it — the trap runs even when the build fails or you interrupt it.
+# Build a disposable copy because the manifest's swiftLanguageMode overrides the
+# xcodebuild SWIFT_VERSION flag. The working manifest is never edited, which also
+# avoids Xcode creating conflict copies while the package is open.
 swift6:
-	@cp Package.swift Package.swift.bak
-	@trap 'mv Package.swift.bak Package.swift' EXIT INT TERM; \
-	sed -i '' 's/\.swiftLanguageMode(\.v5)/.swiftLanguageMode(.v6)/g' Package.swift; \
+	@set -e; tmp=$$(mktemp -d); \
+	trap 'rm -rf "$$tmp"' EXIT INT TERM; \
+	rsync -a --exclude .git --exclude .build --exclude DerivedData ./ "$$tmp/"; \
+	sed -i '' 's/\.swiftLanguageMode(\.v5)/.swiftLanguageMode(.v6)/g' "$$tmp/Package.swift"; \
+	! grep -qF '.swiftLanguageMode(.v5)' "$$tmp/Package.swift"; \
+	grep -qF '.swiftLanguageMode(.v6)' "$$tmp/Package.swift"; \
+	cd "$$tmp"; \
 	xcodebuild build -scheme "$(SCHEME)" -destination "$(DESTINATION)" \
 		SWIFT_STRICT_CONCURRENCY=complete
 

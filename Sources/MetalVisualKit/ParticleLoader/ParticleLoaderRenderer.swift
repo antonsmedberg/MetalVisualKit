@@ -17,7 +17,7 @@ import simd
 // `SIMD2<Float>` at 8-byte alignment exactly as MSL lays out `float2`, so a
 // straight field-order mirror is layout-correct. PipelineTests pins the stride.
 
-/// stride 40, align 8
+/// stride 48, align 8
 struct LoaderUniforms {
     var resolution: SIMD2<Float> = .zero
     var touch: SIMD2<Float> = .zero
@@ -27,6 +27,7 @@ struct LoaderUniforms {
     var touchActive: Float = 0
     var burst: Float = 0
     var motionScale: Float = 1
+    var surfaceIsLight: Float = 0
 }
 
 /// stride 32, align 8
@@ -34,7 +35,7 @@ struct LoaderParticle {
     var position: SIMD2<Float>
     var velocity: SIMD2<Float>
     var phase: Float
-    var hue: Float
+    var variation: Float
     var size: Float
     var energy: Float
 }
@@ -42,6 +43,9 @@ struct LoaderParticle {
 // MARK: - Renderer
 
 final class ParticleLoaderRenderer: NSObject, MTKViewDelegate {
+
+    static let initialRadiusFraction: Float = 0.40
+    static let particleSizeRange: ClosedRange<Float> = 2.5...5
 
     /// Shader function names, kept in one place so the tests can assert on them.
     enum Function {
@@ -54,28 +58,29 @@ final class ParticleLoaderRenderer: NSObject, MTKViewDelegate {
     var progress: Float = 0
     var touch: CGPoint?              // drawable-space pixels
     var motionScale: Float = 1       // 0 when Reduce Motion is enabled
+    var surfaceIsLight = false
 
     let particleCount: Int
 
     private let device: MTLDevice
     private let queue: MTLCommandQueue
     private let computePipeline: MTLComputePipelineState
-    private let renderPipeline: MTLRenderPipelineState
+    private let additiveRenderPipeline: MTLRenderPipelineState
+    private let sourceOverRenderPipeline: MTLRenderPipelineState
     private let threadgroupWidth: Int
 
-    private var particleBuffer: MTLBuffer?
+    private let particleBuffer: MTLBuffer
+    private var hasSeededParticles = false
     private var isActive = true
 
     private var lastFrameTime = CACurrentMediaTime()
-    /// Accumulated from rendered frame deltas rather than read off the wall
-    /// clock. Wall-clock time keeps running while the app is backgrounded, so
-    /// returning after 20 seconds would advance the noise field by 20 seconds
-    /// in a single frame and snap the whole ring.
+    /// Frame-delta clock that excludes time spent in the background.
     private var simulationTime: Double = 0
     private var lastProgress: Float = 0
     private var burst: Float = 0
 
     init(view: MTKView, particleCount: Int = 1_400) throws {
+        let particleBufferLength = try Self.particleBufferLength(for: particleCount)
         guard let device = view.device ?? MTLCreateSystemDefaultDevice() else {
             throw MetalVisualError.noMetalDevice
         }
@@ -91,6 +96,14 @@ final class ParticleLoaderRenderer: NSObject, MTKViewDelegate {
         self.particleCount = particleCount
         self.computePipeline = try device.makeComputePipelineState(function: computeFunction)
         self.threadgroupWidth = min(computePipeline.maxTotalThreadsPerThreadgroup, 256)
+        guard let particleBuffer = device.makeBuffer(
+            length: particleBufferLength,
+            options: .storageModeShared
+        ) else {
+            throw MetalVisualError.particleBufferUnavailable
+        }
+        self.particleBuffer = particleBuffer
+        self.particleBuffer.label = "MetalVisualKit.Particles"
 
         let descriptor = MTLRenderPipelineDescriptor()
         descriptor.label = "MetalVisualKit.ParticleLoader"
@@ -105,7 +118,12 @@ final class ParticleLoaderRenderer: NSObject, MTKViewDelegate {
         descriptor.colorAttachments[0].destinationRGBBlendFactor = .one
         descriptor.colorAttachments[0].sourceAlphaBlendFactor = .one
         descriptor.colorAttachments[0].destinationAlphaBlendFactor = .one
-        self.renderPipeline = try device.makeRenderPipelineState(descriptor: descriptor)
+        self.additiveRenderPipeline = try device.makeRenderPipelineState(descriptor: descriptor)
+
+        descriptor.label = "MetalVisualKit.ParticleLoader.LightSurface"
+        descriptor.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
+        descriptor.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
+        self.sourceOverRenderPipeline = try device.makeRenderPipelineState(descriptor: descriptor)
 
         super.init()
 
@@ -113,62 +131,74 @@ final class ParticleLoaderRenderer: NSObject, MTKViewDelegate {
         view.isOpaque = false
         view.backgroundColor = .clear
         view.clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
-        // 60, not 120. A progress indicator does not earn double the GPU
-        // submissions, memory bandwidth and battery on a ProMotion display;
-        // the physics is timestep-independent so it looks the same either way.
+        // 60 FPS is the default quality/energy trade-off. Particle integration
+        // is timestep-independent.
         view.preferredFramesPerSecond = 60
         view.framebufferOnly = true
     }
 
+    static func validateParticleCount(_ particleCount: Int) throws {
+        _ = try particleBufferLength(for: particleCount)
+    }
+
+    private static func particleBufferLength(for particleCount: Int) throws -> Int {
+        guard particleCount > 0 else {
+            throw MetalVisualError.invalidParticleCount(particleCount)
+        }
+        let (length, overflow) = MemoryLayout<LoaderParticle>.stride
+            .multipliedReportingOverflow(by: particleCount)
+        guard !overflow else {
+            throw MetalVisualError.particleCountTooLarge(particleCount)
+        }
+        return length
+    }
+
     // MARK: - Seeding
 
-    private func seedParticles(size: CGSize) {
-        guard size.width > 0, size.height > 0 else { return }
-
+    static func makeSeedParticles(particleCount: Int, size: CGSize) -> [LoaderParticle] {
+        guard particleCount > 0, size.width > 0, size.height > 0 else { return [] }
         let center = SIMD2<Float>(Float(size.width) * 0.5, Float(size.height) * 0.5)
-        let radius = Float(min(size.width, size.height)) * 0.32
+        let radius = Float(min(size.width, size.height)) * Self.initialRadiusFraction
 
         var particles: [LoaderParticle] = []
         particles.reserveCapacity(particleCount)
         for index in 0..<particleCount {
             let phase = (Float(index) / Float(particleCount)) * 2 * .pi
-            let ringRadius = radius * Float.random(in: 0.9...1.1)
             particles.append(
                 LoaderParticle(
-                    position: center + SIMD2(cos(phase), sin(phase)) * ringRadius,
+                    position: center + SIMD2(cos(phase), sin(phase)) * radius,
                     velocity: .zero,
                     phase: phase,
-                    hue: Float(index) / Float(particleCount),
-                    size: Float.random(in: 3...9),
+                    variation: Float(index) / Float(particleCount),
+                    size: Float.random(in: Self.particleSizeRange),
                     energy: 0.5
                 )
             )
         }
+        return particles
+    }
 
-        particleBuffer = device.makeBuffer(
-            bytes: particles,
-            length: MemoryLayout<LoaderParticle>.stride * particleCount,
-            options: .storageModeShared
-        )
-        particleBuffer?.label = "MetalVisualKit.Particles"
+    private func seedParticles(size: CGSize) {
+        let particles = Self.makeSeedParticles(particleCount: particleCount, size: size)
+        guard !particles.isEmpty else { return }
+
+        particles.withUnsafeBytes { bytes in
+            guard let source = bytes.baseAddress else { return }
+            particleBuffer.contents().copyMemory(from: source, byteCount: bytes.count)
+        }
+        hasSeededParticles = true
     }
 
     // MARK: - MTKViewDelegate
 
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
-        // Deliberately does *not* reseed. SwiftUI emits a stream of intermediate
-        // sizes while animating a frame, and rebuilding 1,400 particles on each
-        // one both churns allocations and visibly resets the effect. The shader
-        // reads the new resolution from the uniforms and the existing particles
-        // spring toward the new ring, which is cheaper and looks better.
-        if particleBuffer == nil {
+        // Preserve particle state across SwiftUI's intermediate resize frames.
+        if !hasSeededParticles {
             seedParticles(size: size)
         }
     }
 
-    /// Idempotent by design: SwiftUI's `updateUIView` runs on every progress
-    /// change, and resetting the frame clock there would corrupt `dt` on every
-    /// tick. Only a genuine inactive → active transition restarts the clock.
+    /// Changes rendering activity without resetting timing on repeated updates.
     func setActive(_ active: Bool) {
         guard active != isActive else { return }
         isActive = active
@@ -176,18 +206,18 @@ final class ParticleLoaderRenderer: NSObject, MTKViewDelegate {
             // Discard the gap accumulated while inactive; it would otherwise
             // arrive as one enormous dt and fling every particle off screen.
             lastFrameTime = CACurrentMediaTime()
+        } else {
+            touch = nil
         }
     }
 
     func draw(in view: MTKView) {
         let drawableSize = view.drawableSize
         guard drawableSize.width > 0, drawableSize.height > 0 else { return }
-        if particleBuffer == nil {
+        if !hasSeededParticles {
             seedParticles(size: drawableSize)
         }
-
         guard
-            let particleBuffer,
             let drawable = view.currentDrawable,
             let passDescriptor = view.currentRenderPassDescriptor,
             let commandBuffer = queue.makeCommandBuffer()
@@ -196,7 +226,7 @@ final class ParticleLoaderRenderer: NSObject, MTKViewDelegate {
         var uniforms = makeUniforms(drawableSize: drawableSize)
         let uniformSize = MemoryLayout<LoaderUniforms>.stride
 
-        // 1. Physics
+        let computeSignpost = MetalVisualLog.signposter.beginInterval("Particle compute encode")
         if let compute = commandBuffer.makeComputeCommandEncoder() {
             compute.label = "Particle physics"
             compute.setComputePipelineState(computePipeline)
@@ -208,16 +238,20 @@ final class ParticleLoaderRenderer: NSObject, MTKViewDelegate {
             )
             compute.endEncoding()
         }
+        MetalVisualLog.signposter.endInterval("Particle compute encode", computeSignpost)
 
-        // 2. One draw call for every particle
+        let renderSignpost = MetalVisualLog.signposter.beginInterval("Particle render encode")
         if let render = commandBuffer.makeRenderCommandEncoder(descriptor: passDescriptor) {
             render.label = "Particle render"
-            render.setRenderPipelineState(renderPipeline)
+            render.setRenderPipelineState(
+                surfaceIsLight ? sourceOverRenderPipeline : additiveRenderPipeline
+            )
             render.setVertexBuffer(particleBuffer, offset: 0, index: 0)
             render.setVertexBytes(&uniforms, length: uniformSize, index: 1)
             render.drawPrimitives(type: .point, vertexStart: 0, vertexCount: particleCount)
             render.endEncoding()
         }
+        MetalVisualLog.signposter.endInterval("Particle render encode", renderSignpost)
 
         commandBuffer.present(drawable)
         commandBuffer.commit()
@@ -234,7 +268,7 @@ final class ParticleLoaderRenderer: NSObject, MTKViewDelegate {
         // full amplitude instead of already-damped 0.9. The envelope decays per
         // second, matching the shader's own timestep-independent damping — a
         // per-frame `*= 0.90` would empty the burst twice as fast at 120 Hz.
-        burst *= pow(0.90, delta * 60)
+        burst *= pow(0.94, delta * 60)
         if progress >= 1, lastProgress < 1 { burst = 1 }
         lastProgress = progress
 
@@ -245,6 +279,7 @@ final class ParticleLoaderRenderer: NSObject, MTKViewDelegate {
         uniforms.progress = min(max(progress, 0), 1)
         uniforms.burst = burst
         uniforms.motionScale = motionScale
+        uniforms.surfaceIsLight = surfaceIsLight ? 1 : 0
         if let touch {
             uniforms.touch = SIMD2(Float(touch.x), Float(touch.y))
             uniforms.touchActive = 1

@@ -8,10 +8,10 @@ import Foundation
 import os
 
 /// Failures that can occur while standing up a renderer.
-///
-/// These are surfaced rather than silently swallowed: a component that renders
-/// nothing and logs nothing is the hardest kind of graphics bug to diagnose.
 enum MetalVisualError: Swift.Error, CustomStringConvertible {
+    case invalidParticleCount(Int)
+    case particleCountTooLarge(Int)
+    case particleBufferUnavailable
     case noMetalDevice
     case commandQueueUnavailable
     case depthStateUnavailable
@@ -19,6 +19,12 @@ enum MetalVisualError: Swift.Error, CustomStringConvertible {
 
     var description: String {
         switch self {
+        case .invalidParticleCount(let count):
+            return "Particle count must be positive (received \(count))."
+        case .particleCountTooLarge(let count):
+            return "Particle count is too large to allocate safely (received \(count))."
+        case .particleBufferUnavailable:
+            return "The Metal device could not allocate the particle buffer."
         case .noMetalDevice:
             return "No Metal device is available on this host."
         case .commandQueueUnavailable:
@@ -33,5 +39,7 @@ enum MetalVisualError: Swift.Error, CustomStringConvertible {
 
 /// Subsystem logger. Filter in Console.app with `subsystem:eu.smedberg.MetalVisualKit`.
 enum MetalVisualLog {
-    static let renderer = Logger(subsystem: "eu.smedberg.MetalVisualKit", category: "renderer")
+    static let subsystem = "eu.smedberg.MetalVisualKit"
+    static let renderer = Logger(subsystem: subsystem, category: "renderer")
+    static let signposter = OSSignposter(subsystem: subsystem, category: "rendering")
 }

@@ -21,32 +21,40 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      # Pinned to the immutable commit for v6.0.2; tags are mutable. Dependabot
+      # Pinned to the immutable commit for v7.0.1; tags are mutable. Dependabot
       # keeps the pin current. Re-resolve with:
       #   gh api repos/actions/checkout/git/ref/tags/<tag> --jq .object.sha
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Swift/MSL struct parity
         run: python3 Scripts/check-struct-parity.py
+      - name: Shader safety
+        run: python3 Scripts/check-shader-safety.py
+      - name: Media integrity
+        run: |
+          python3 Scripts/check-media.py
+          python3 Scripts/test-media-check.py
       - name: Simulator selector logic
         run: python3 Scripts/test-simulator-selection.py
+      - name: Xcode workspace integration
+        run: python3 Scripts/check-xcode-integration.py
 
   build:
     name: Build and test
     runs-on: macos-26
     timeout-minutes: 30
     steps:
-      # Pinned to the immutable commit for v6.0.2; tags are mutable. Dependabot
+      # Pinned to the immutable commit for v7.0.1; tags are mutable. Dependabot
       # keeps the pin current. Re-resolve with:
       #   gh api repos/actions/checkout/git/ref/tags/<tag> --jq .object.sha
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Toolchain
-        # macos-26 is the Apple-silicon image carrying the iOS 26 SDK, which is
-        # the App Store submission floor as of 28 April 2026.
         run: xcodebuild -version
+      - name: Swift package manifest
+        run: swift package dump-package >/dev/null
       - name: Choose a simulator that exists on this runner
         id: sim
         run: echo "destination=$(python3 Scripts/select-ios-simulator.py)" >> "$GITHUB_OUTPUT"
@@ -72,34 +80,42 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 30
     steps:
-      # Pinned to the immutable commit for v6.0.2; tags are mutable. Dependabot
+      # Pinned to the immutable commit for v7.0.1; tags are mutable. Dependabot
       # keeps the pin current. Re-resolve with:
       #   gh api repos/actions/checkout/git/ref/tags/<tag> --jq .object.sha
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Choose a simulator
         id: sim
         run: echo "destination=$(python3 Scripts/select-ios-simulator.py)" >> "$GITHUB_OUTPUT"
+      - name: Verify generated Xcode project
+        run: |
+          brew install xcodegen
+          make project
+          git diff --exit-code -- \
+            Examples/MetalVisualKitDemo/Info.plist \
+            Examples/MetalVisualKitDemo/MetalVisualKitDemo.xcodeproj
       - name: Build
         run: |
           set -o pipefail
           xcodebuild build \
-            -project Examples/MetalVisualKitDemo/MetalVisualKitDemo.xcodeproj \
+            -workspace Examples/MetalVisualKit.xcworkspace \
             -scheme MetalVisualKitDemo \
             -destination "${{ steps.sim.outputs.destination }}" -quiet
 
   swift6:
     name: Swift 6 language mode (advisory)
     runs-on: macos-26
+    timeout-minutes: 30
     # Not a gate. This lane exists to produce the list of data-race diagnostics
     # that must be resolved before the package can adopt .swiftLanguageMode(.v6).
     continue-on-error: true
     steps:
-      # Pinned to the immutable commit for v6.0.2; tags are mutable. Dependabot
+      # Pinned to the immutable commit for v7.0.1; tags are mutable. Dependabot
       # keeps the pin current. Re-resolve with:
       #   gh api repos/actions/checkout/git/ref/tags/<tag> --jq .object.sha
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Choose a simulator
@@ -113,7 +129,11 @@ jobs:
       - name: Switch the checkout to Swift 6 language mode
         run: |
           sed -i '' 's/\.swiftLanguageMode(\.v5)/.swiftLanguageMode(.v6)/g' Package.swift
-          grep -n 'swiftLanguageMode' Package.swift
+          if grep -qF '.swiftLanguageMode(.v5)' Package.swift; then
+            echo 'Swift 5 language mode remained after manifest rewrite.' >&2
+            exit 1
+          fi
+          grep -qF '.swiftLanguageMode(.v6)' Package.swift
       - name: Build with strict concurrency
         run: |
           xcodebuild build -scheme MetalVisualKit \
@@ -125,10 +145,10 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 30
     steps:
-      # Pinned to the immutable commit for v6.0.2; tags are mutable. Dependabot
+      # Pinned to the immutable commit for v7.0.1; tags are mutable. Dependabot
       # keeps the pin current. Re-resolve with:
       #   gh api repos/actions/checkout/git/ref/tags/<tag> --jq .object.sha
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - run: brew install swiftlint

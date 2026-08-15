@@ -29,6 +29,7 @@ TESTS = ROOT / "Tests" / "MetalVisualKitTests" / "PipelineTests.swift"
 LAYOUT = {
     "float": (4, 4),
     "float2": (8, 8),
+    "float3": (16, 16),
     "float3x3": (48, 16),   # three 16-byte-aligned columns, not 36 bytes
     "float4x4": (64, 16),
 }
@@ -36,6 +37,7 @@ LAYOUT = {
 SWIFT_TO_MSL = {
     "Float": "float",
     "SIMD2<Float>": "float2",
+    "SIMD3<Float>": "float3",
     "simd_float3x3": "float3x3",
     "simd_float4x4": "float4x4",
 }

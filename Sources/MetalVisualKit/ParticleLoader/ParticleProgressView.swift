@@ -9,6 +9,24 @@ import MetalKit
 import SwiftUI
 import UIKit
 
+/// Palette and compositing tuned for the surface behind a particle indicator.
+public enum ParticleSurfaceStyle: Sendable {
+    /// Follow the SwiftUI colour scheme.
+    case automatic
+    /// Brighter additive glow for dark surfaces.
+    case dark
+    /// Darker source-over particles that stay legible on light surfaces.
+    case light
+
+    func usesLightPalette(in colourScheme: ColorScheme) -> Bool {
+        switch self {
+        case .automatic: return colourScheme == .light
+        case .dark: return false
+        case .light: return true
+        }
+    }
+}
+
 // MARK: - Touch-aware MTKView
 
 /// Reports touches in *drawable* pixels, which is the space the shader works in.
@@ -36,8 +54,25 @@ final class TouchMTKView: MTKView {
 struct ParticleLoaderMetalView: UIViewRepresentable {
     var progress: Double
     var reduceMotion: Bool
+    var surfaceIsLight: Bool
     var isInteractive: Bool
     var isActive: Bool
+
+    static func shouldRenderContinuously(isActive: Bool, reduceMotion: Bool) -> Bool {
+        isActive && !reduceMotion
+    }
+
+    private func configureDrawingMode(_ view: MTKView) {
+        let continuous = Self.shouldRenderContinuously(
+            isActive: isActive,
+            reduceMotion: reduceMotion
+        )
+        view.enableSetNeedsDisplay = !continuous
+        view.isPaused = !continuous
+        if isActive && !continuous {
+            view.setNeedsDisplay()
+        }
+    }
 
     final class Coordinator {
         var renderer: ParticleLoaderRenderer?
@@ -54,11 +89,12 @@ struct ParticleLoaderMetalView: UIViewRepresentable {
             // reflects the caller's values rather than flashing the defaults.
             renderer.progress = Float(progress)
             renderer.motionScale = reduceMotion ? 0 : 1
+            renderer.surfaceIsLight = surfaceIsLight
             renderer.setActive(isActive)
-            view.isPaused = !isActive
             view.delegate = renderer
             view.onTouch = { [weak renderer] point in renderer?.touch = point }
             context.coordinator.renderer = renderer
+            configureDrawingMode(view)
         } catch {
             MetalVisualLog.renderer.error(
                 "ParticleLoaderRenderer failed to initialise: \(String(describing: error), privacy: .public)"
@@ -73,13 +109,18 @@ struct ParticleLoaderMetalView: UIViewRepresentable {
         let renderer = context.coordinator.renderer
         renderer?.progress = Float(progress)
         renderer?.motionScale = reduceMotion ? 0 : 1
+        renderer?.surfaceIsLight = surfaceIsLight
         renderer?.setActive(isActive)
+        if !isInteractive || !isActive {
+            renderer?.touch = nil
+        }
         uiView.isUserInteractionEnabled = isInteractive
-        uiView.isPaused = !isActive
+        configureDrawingMode(uiView)
     }
 
     static func dismantleUIView(_ uiView: TouchMTKView, coordinator: Coordinator) {
         uiView.isPaused = true
+        coordinator.renderer?.touch = nil
         uiView.delegate = nil
         uiView.onTouch = nil
     }
@@ -89,11 +130,12 @@ struct ParticleLoaderMetalView: UIViewRepresentable {
 
 /// A determinate progress indicator drawn as a GPU particle ring.
 ///
-/// The ring fills as `progress` moves from `0` to `1`, particles drift on curl
-/// noise, dragging across the view repels them, and completion triggers a burst.
+/// The ring fills as `progress` moves from `0` to `1`. Coherent travelling waves
+/// shape the motion, restrained curl adds variation, dragging repels particles,
+/// and completion triggers a short radial release.
 ///
 /// ```swift
-/// ParticleProgressView(progress: $exportProgress, title: "Exporting")
+/// ParticleProgressView(progress: exportProgress, title: "Exporting")
 ///     .frame(width: 320, height: 320)
 /// ```
 ///
@@ -104,30 +146,50 @@ public struct ParticleProgressView: View {
     private let progress: Double
     private let title: String
     private let isInteractive: Bool
+    private let surfaceStyle: ParticleSurfaceStyle
+    private let labelColor: Color?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var colourScheme
     @Environment(\.scenePhase) private var scenePhase
 
     /// - Parameters:
     ///   - progress: Completion in `0...1`. Values outside the range, and NaN,
     ///     are clamped.
     ///   - title: Caption shown beneath the percentage.
-    ///   - isInteractive: Whether dragging scatters the particles. Pass `false`
-    ///     when the loader sits above controls that need the touches.
-    public init(progress: Double, title: String = "Loading", isInteractive: Bool = true) {
+    ///   - isInteractive: Set to `true` to let dragging scatter the particles.
+    ///   - surfaceStyle: Palette and compositing for the host surface.
+    ///   - labelColor: Optional centre-label colour. The default follows `.primary`.
+    public init(
+        progress: Double,
+        title: String = "Loading",
+        isInteractive: Bool = true,
+        surfaceStyle: ParticleSurfaceStyle = .automatic,
+        labelColor: Color? = nil
+    ) {
         self.progress = progress
         self.title = title
         self.isInteractive = isInteractive
+        self.surfaceStyle = surfaceStyle
+        self.labelColor = labelColor
     }
 
-    /// Convenience for call sites that already hold a `Binding`. The view only
-    /// reads the value; it never writes back.
+    /// Convenience for call sites that already hold a `Binding`. The view reads
+    /// the current value but never writes through the binding.
     public init(
         progress: Binding<Double>,
         title: String = "Loading",
-        isInteractive: Bool = true
+        isInteractive: Bool = true,
+        surfaceStyle: ParticleSurfaceStyle = .automatic,
+        labelColor: Color? = nil
     ) {
-        self.init(progress: progress.wrappedValue, title: title, isInteractive: isInteractive)
+        self.init(
+            progress: progress.wrappedValue,
+            title: title,
+            isInteractive: isInteractive,
+            surfaceStyle: surfaceStyle,
+            labelColor: labelColor
+        )
     }
 
     /// NaN would otherwise propagate into the uniform buffer and take the whole
@@ -140,6 +202,7 @@ public struct ParticleProgressView: View {
             ParticleLoaderMetalView(
                 progress: clamped,
                 reduceMotion: reduceMotion,
+                surfaceIsLight: surfaceStyle.usesLightPalette(in: colourScheme),
                 isInteractive: isInteractive,
                 isActive: scenePhase == .active
             )
@@ -148,8 +211,8 @@ public struct ParticleProgressView: View {
                 Group {
                     if isComplete {
                         Image(systemName: "checkmark")
-                            .font(.system(size: 40, weight: .bold))
-                            .transition(.scale.combined(with: .opacity))
+                            .font(.system(size: 38, weight: .semibold))
+                            .transition(.scale(scale: 0.92).combined(with: .opacity))
                     } else {
                         Text("\(Int(clamped * 100))")
                             .font(.system(size: 46, weight: .semibold, design: .rounded))
@@ -157,15 +220,18 @@ public struct ParticleProgressView: View {
                             .contentTransition(.numericText())
                     }
                 }
-                .foregroundStyle(.white)
+                .foregroundStyle(labelColor ?? Color.primary)
 
                 Text(isComplete ? "Done" : title)
                     .font(.footnote.weight(.medium))
-                    .foregroundStyle(.white.opacity(0.55))
+                    .foregroundStyle(labelColor?.opacity(0.55) ?? Color.secondary)
                     .textCase(.uppercase)
                     .kerning(1.5)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
             }
-            .animation(reduceMotion ? nil : .spring(duration: 0.45), value: isComplete)
+            .frame(maxWidth: 160)
+            .animation(reduceMotion ? nil : .smooth(duration: 0.40), value: isComplete)
             .allowsHitTesting(false)
         }
         .accessibilityElement(children: .ignore)
@@ -190,20 +256,26 @@ private struct SpinnerTaskKey: Equatable {
 public struct ParticleSpinnerView: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var colourScheme
     @Environment(\.scenePhase) private var scenePhase
     @State private var progress: Double = 0
 
     private let label: String
+    private let surfaceStyle: ParticleSurfaceStyle
 
-    /// - Parameter label: Accessibility label for the spinner.
-    public init(label: String = "Loading") {
+    /// - Parameters:
+    ///   - label: Accessibility label for the spinner.
+    ///   - surfaceStyle: Palette and compositing for the host surface.
+    public init(label: String = "Loading", surfaceStyle: ParticleSurfaceStyle = .automatic) {
         self.label = label
+        self.surfaceStyle = surfaceStyle
     }
 
     public var body: some View {
         ParticleLoaderMetalView(
             progress: progress,
             reduceMotion: reduceMotion,
+            surfaceIsLight: surfaceStyle.usesLightPalette(in: colourScheme),
             // A spinner is decoration; it must not swallow touches meant for
             // whatever it is covering.
             isInteractive: false,
@@ -223,7 +295,11 @@ public struct ParticleSpinnerView: View {
                 }
                 guard scenePhase == .active else { return }
                 while !Task.isCancelled {
-                    try? await Task.sleep(for: .milliseconds(33))
+                    do {
+                        try await Task.sleep(for: .milliseconds(33))
+                    } catch {
+                        return
+                    }
                     progress = progress >= 1.25 ? 0 : progress + 0.007
                 }
             }
@@ -247,7 +323,11 @@ public struct ParticleSpinnerView: View {
             }
             .task {
                 while !Task.isCancelled {
-                    try? await Task.sleep(for: .milliseconds(40))
+                    do {
+                        try await Task.sleep(for: .milliseconds(40))
+                    } catch {
+                        return
+                    }
                     progress = progress >= 1.4 ? 0 : progress + 0.006
                 }
             }
