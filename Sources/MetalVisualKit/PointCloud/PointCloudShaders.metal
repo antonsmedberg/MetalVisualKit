@@ -8,13 +8,17 @@
 //  samples its own depth pixel and unprojects itself. No depth or point data is
 //  ever read back to the CPU.
 //
-//  Struct layouts here are mirrored by hand in PointCloudRenderer.swift.
+//  The camera image is bound to the same vertex shader as two planes. The depth
+//  map and the captured image cover the same scene at the same aspect ratio, so
+//  the normalised coordinate a point was unprojected from indexes both.
+//
+//  Struct layouts here are mirrored by hand in PointCloudTypes.swift.
 //
 
 #include <metal_stdlib>
 using namespace metal;
 
-// MARK: - Shared types (mirrored in PointCloudRenderer.swift)
+// MARK: - Shared types (mirrored in PointCloudTypes.swift)
 
 /// stride 208, align 16 — see PipelineTests.testCloudUniformsStride
 struct CloudUniforms {
@@ -26,6 +30,7 @@ struct CloudUniforms {
     float    pointSize;
     float    maxDepth;            // metres
     float    minConfidence;       // raw ARConfidenceLevel: 0 low, 1 medium, 2 high
+    float    colorMode;           // 0 camera, 1 depth, 2 confidence
 };
 
 /// stride 96, align 16 — see PipelineTests.testDemoUniformsStride
@@ -44,7 +49,12 @@ struct CloudVSOut {
     float4 colour;
 };
 
-// MARK: - Depth palette
+// Compared against midpoints so a float uniform selects a discrete mode without
+// relying on exact equality.
+constant float kColorModeCamera = 0.0;
+constant float kColorModeDepth = 1.0;
+
+// MARK: - Palettes
 
 /// Project-specific near-to-far gradient: deep blue → cyan → violet → coral.
 /// Kept small and explicit to avoid an external colour-map dependency.
@@ -60,6 +70,13 @@ static float3 depthPalette(float x) {
     return mix(colour, edgeColour, smoothstep(0.68, 1.00, x));
 }
 
+/// Traffic-light reading of ARKit's confidence levels, for the diagnostic mode.
+static float3 confidencePalette(uint level) {
+    if (level == 0u) { return float3(0.95, 0.26, 0.22); }   // low
+    if (level == 1u) { return float3(0.98, 0.72, 0.18); }   // medium
+    return float3(0.20, 0.85, 0.45);                        // high
+}
+
 static float confidenceOpacity(uint level) {
     return level == 0 ? 0.25 : (level == 1 ? 0.55 : 1.0);
 }
@@ -68,12 +85,35 @@ static float hash11(float x) {
     return fract(sin(x * 127.1) * 43758.5453);
 }
 
+// MARK: - Camera colour
+
+/// Full-range YCbCr to sRGB. ARKit captures full-range ITU-R BT.601 values, so
+/// the video-range scaling that most YUV code applies must not be used here.
+static float3 cameraColour(texture2d<float, access::sample> luma,
+                           texture2d<float, access::sample> chroma,
+                           float2 uv)
+{
+    constexpr sampler cameraSampler(filter::linear, address::clamp_to_edge);
+    const float4x4 ycbcrToRGB = float4x4(
+        float4(+1.0000, +1.0000, +1.0000, +0.0000),
+        float4(+0.0000, -0.3441, +1.7720, +0.0000),
+        float4(+1.4020, -0.7141, +0.0000, +0.0000),
+        float4(-0.7010, +0.5291, -0.8860, +1.0000)
+    );
+    float4 ycbcr = float4(luma.sample(cameraSampler, uv).r,
+                          chroma.sample(cameraSampler, uv).rg,
+                          1.0);
+    return saturate((ycbcrToRGB * ycbcr).rgb);
+}
+
 // MARK: - Live LiDAR vertex shader
 
-vertex CloudVSOut pointCloudVertex(uint vid                                [[vertex_id]],
-                                   constant CloudUniforms &u               [[buffer(0)]],
-                                   texture2d<float, access::read> depthTex [[texture(0)]],
-                                   texture2d<uint,  access::read> confTex  [[texture(1)]])
+vertex CloudVSOut pointCloudVertex(uint vid                                  [[vertex_id]],
+                                   constant CloudUniforms &u                 [[buffer(0)]],
+                                   texture2d<float, access::read>   depthTex [[texture(0)]],
+                                   texture2d<uint,  access::read>   confTex  [[texture(1)]],
+                                   texture2d<float, access::sample> cameraY  [[texture(2)]],
+                                   texture2d<float, access::sample> cameraCbCr [[texture(3)]])
 {
     uint gridWidth = uint(u.gridResolution.x);
     uint2 coord = uint2(vid % gridWidth, vid / gridWidth);
@@ -107,8 +147,18 @@ vertex CloudVSOut pointCloudVertex(uint vid                                [[ver
     float projectedSize = u.pointSize / max(out.position.w, 0.1);
     out.pointSize = clamp(projectedSize, u.pointSize * 0.1875, u.pointSize * 1.5);
 
-    float t = clamp(depth / u.maxDepth, 0.0, 1.0);
-    out.colour = float4(depthPalette(t), 0.95 * confidenceOpacity(conf));
+    // Swift resolves colorMode away from camera whenever the image could not be
+    // bound, so camera textures are sampled only when both are available.
+    float3 colour;
+    if (u.colorMode < kColorModeCamera + 0.5) {
+        colour = cameraColour(cameraY, cameraCbCr, uv);
+    } else if (u.colorMode < kColorModeDepth + 0.5) {
+        colour = depthPalette(clamp(depth / u.maxDepth, 0.0, 1.0));
+    } else {
+        colour = confidencePalette(conf);
+    }
+
+    out.colour = float4(colour, 0.95 * confidenceOpacity(conf));
     return out;
 }
 
@@ -170,9 +220,12 @@ fragment float4 cloudFragment(CloudVSOut in [[stage_in]],
                               float2 pc     [[point_coord]])
 {
     float d = length(pc - 0.5) * 2.0;
-    if (d > 1.0) {
+    float alpha = in.colour.a * (1.0 - smoothstep(0.55, 1.0, d));
+
+    // Blending is enabled with depth writes, so an invisible fragment would
+    // still occlude points behind it. Drop it before it reaches the depth buffer.
+    if (alpha < 0.02) {
         discard_fragment();
     }
-    float alpha = 1.0 - smoothstep(0.55, 1.0, d);
-    return float4(in.colour.rgb, in.colour.a * alpha);
+    return float4(in.colour.rgb, alpha);
 }

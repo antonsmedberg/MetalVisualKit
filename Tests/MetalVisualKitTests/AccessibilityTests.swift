@@ -14,6 +14,7 @@ final class AccessibilityTests: XCTestCase {
         let bridge = PointCloudMetalView(
             source: .demo,
             maxDepth: 5,
+            colorMode: .camera,
             reduceMotion: false,
             isActive: true,
             allowsOrbitInteraction: true,
@@ -42,6 +43,7 @@ final class AccessibilityTests: XCTestCase {
         let bridge = PointCloudMetalView(
             source: .demo,
             maxDepth: 5,
+            colorMode: .camera,
             reduceMotion: false,
             isActive: true,
             allowsOrbitInteraction: true

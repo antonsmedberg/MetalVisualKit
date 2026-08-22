@@ -11,9 +11,9 @@ both exposed as SwiftUI views.
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
 > **Pre-release.** Xcode 26.6 builds the package, the current test suite, the
-> example app and its DocC archive. The loader below ran in an iOS 26.5 simulator. Live
-> capture has not run on physical LiDAR hardware. Nothing is tagged; see
-> [CHANGELOG](CHANGELOG.md).
+> example app and its DocC archive. The loader below ran in an iOS 26.5 simulator.
+> Live capture has not run on physical LiDAR hardware, so the camera-colour path
+> is not yet verified end to end. Nothing is tagged; see [CHANGELOG](CHANGELOG.md).
 
 <p align="center">
   <img src="Media/loader-simulator.png" width="320" alt="MetalVisualKit particle loader running in the iOS simulator">
@@ -30,6 +30,10 @@ turning the public API into a Metal project. The first loader pass looked busy
 but wrong: its velocity had moved to pixels per second while the styling curve
 still assumed per-frame values, so every sprite hit the size cap. Fixing that
 made the timing and visual structure much easier to reason about.
+
+The point cloud started as a depth-only gradient. It now samples the camera image
+from the same AR frame, so each point can use the room's own colour while depth
+and confidence views remain available for diagnostics.
 
 ## Open in Xcode
 
@@ -57,6 +61,17 @@ For SwiftUI previews, keep **MetalVisualKitDemo** active. Selecting SwiftPM's
 library-only `MetalVisualKit` scheme while viewing a demo source file produces
 "Active scheme does not build this file" because that scheme intentionally does
 not contain the example app.
+
+## Verify on a LiDAR device
+
+The simulator shows the procedural fallback only. To verify the live path, run
+the demo on a LiDAR-capable iPhone or iPad and grant camera permission. Start in
+**Depth**, move around a room, and rotate through portrait and both landscape
+orientations. Then switch to **Camera** and inspect edges while moving; colour
+that drifts away from geometry indicates a registration or orientation issue.
+
+Use an Xcode release that supports the device's installed iOS version. Keep the
+existing depth path as the baseline before diagnosing camera colour.
 
 ## Install
 
@@ -94,9 +109,25 @@ ParticleProgressView(
 ParticleSpinnerView()
     .frame(width: 240, height: 240)
 
-// Live depth, with automatic fallback and explicitly enabled demo orbit
-LiDARPointCloudView(displayMode: .live, allowsOrbitInteraction: true)
+// Live depth in camera colour, with automatic fallback
+LiDARPointCloudView(displayMode: .live, colorMode: .camera)
+
+// Diagnostic colouring, with demo orbit explicitly enabled
+LiDARPointCloudView(
+    displayMode: .live,
+    colorMode: .confidence,
+    allowsOrbitInteraction: true
+)
 ```
+
+`colorMode` sets the initial colour source. When controls are visible, the
+segmented control can switch between camera, depth and confidence at runtime.
+
+| Mode | Shows | Useful for |
+|---|---|---|
+| `.camera` | Camera colour sampled per point | Reading the reconstructed room |
+| `.depth` | Near-to-far gradient | Checking range and geometry |
+| `.confidence` | Amber medium and green high; low samples are hidden | Checking sensor quality |
 
 The loader draws on a transparent drawable. Dark surfaces use additive glow;
 light surfaces use premultiplied source-over compositing so particles retain
@@ -114,15 +145,29 @@ triggers a short radial release. One
 struct and encodes the compute and render passes; it does not loop over particles.
 
 **Point cloud.** The ARKit `sceneDepth` map is bound as a texture to the
-*vertex* shader rather than read back. Its dimensions are read from the texture
-at runtime. A 256×192 map produces roughly 49,000 vertices. Each vertex samples
-its own depth pixel, unprojects
-through the inverse camera intrinsics, transforms to world space with the camera
-pose, and colours itself with a project-specific depth palette. Invalid,
-out-of-range and low-confidence samples are culled behind the near plane, while
-medium confidence remains visible at reduced opacity. Swift validates the AR frame, prepares camera
-matrices and binds the depth and confidence textures. It does not read back or
-individually unproject the depth pixels.
+*vertex* shader rather than read back. A 256×192 map produces roughly 49,000
+vertices. Each vertex samples its depth pixel, unprojects through the inverse
+camera intrinsics and transforms to world space with the camera pose. Invalid,
+out-of-range and low-confidence samples are culled behind the near plane.
+
+**Camera colour.** `ARFrame.capturedImage` from the same frame is bound as luma
+and chroma textures. The vertex shader converts full-range YCbCr to RGB and uses
+the depth coordinate to sample camera colour. If the camera planes cannot be
+bound, that frame falls back to the depth palette instead of disappearing.
+
+The point-cloud implementation is split by responsibility:
+
+| File | Responsibility |
+|---|---|
+| `LiDARPointCloudView.swift` | Public SwiftUI API, permission and controls |
+| `PointCloudMetalView.swift` | `UIViewRepresentable`, lifecycle and gestures |
+| `PointCloudRenderer.swift` | Draw loop and uniform assembly |
+| `ARFrameTextures.swift` | Core Video to Metal texture binding |
+| `PointCloudSessionMonitor.swift` | AR session state and user guidance |
+| `PointCloudShaders.metal` | Unprojection, colour modes and sprite rendering |
+
+`PointCloudSessionMonitor` distinguishes normal tracking, limited tracking,
+interruptions and failures so an empty surface is not the only error signal.
 
 ## Accessibility
 
@@ -132,7 +177,7 @@ intact. Settled particle and procedural demo views switch to on-demand drawing
 instead of redrawing static frames. Both components expose accessibility labels;
 the loader also publishes its percentage to VoiceOver. When procedural orbit is
 enabled, the cloud exposes named VoiceOver actions for rotating left, right, up
-and down.
+and down. The live cloud's accessibility label also identifies its colour mode.
 
 ## Current rendering defaults
 
@@ -143,14 +188,18 @@ and down.
 | Ring radius | `ParticleShaders.metal` | 40% of the shorter side |
 | Particle surface | `ParticleSurfaceStyle` | automatic, with explicit light/dark overrides |
 | Particle palette | `particleVertex` | surface-aware indigo/cyan arc and sweep head |
+| Colour mode | `LiDARPointCloudView(colorMode:)` | `.camera` |
 | Max scan depth | `LiDARPointCloudView` slider / `maxDepth` | 5 m |
 | Confidence floor | `CloudUniforms.minConfidence` | 1 (raw `ARConfidenceLevel`, drops *low*) |
 | Point size | `CloudUniforms.pointSize` | 8 layout points, scaled to drawable pixels |
-| Colour map | `depthPalette()` in `PointCloudShaders.metal` | blue → cyan → violet → coral |
+| Depth colour map | `depthPalette()` in `PointCloudShaders.metal` | blue → cyan → violet → coral |
+| Camera conversion | `cameraColour()` in `PointCloudShaders.metal` | full-range BT.601 → RGB |
 
 ## Requirements
 
-- **iOS 17+** and Swift tools 6.0.
+- **iOS 17+** deployment target and Swift tools 6.0.
+- The package currently builds with the iOS 26 SDK because the control surface
+  uses `glassEffect` behind an iOS 26 availability check.
 - CI currently builds with Xcode 26.6 and the iOS 26 SDK. Older compatible Xcode
   versions are not part of the tested matrix.
 - Swift 5 language mode by default. See *Swift 6 migration* below.
@@ -181,6 +230,9 @@ When the advisory build has no concurrency diagnostics, change
   registration, camera permission recovery, thermal behaviour and GPU frame time
   still need device testing. The orientation derivation follows Apple's
   *Visualizing a Point Cloud Using Scene Depth* sample.
+- **Camera colour is unverified on hardware.** Pixel formats and the conversion
+  matrix follow Apple's documentation, but colour cast, orientation and
+  camera-to-depth registration still need a real-device pass.
 - **Uniform struct layouts are mirrored by hand** between Swift and MSL. Editing
   one side without the other produces a visual glitch rather than a crash.
   `Scripts/check-struct-parity.py` compares the two declarations directly and
@@ -230,14 +282,17 @@ Please report vulnerabilities privately according to
 ## Privacy
 
 The package collects nothing, tracks nobody, performs no networking and uses no
-required-reason APIs. `Sources/MetalVisualKit/PrivacyInfo.xcprivacy` declares this.
-Camera permission stays the host app's responsibility.
+required-reason APIs. Camera frames become Metal textures for rendering; they are
+not copied to the CPU, written to disk or sent anywhere.
+`Sources/MetalVisualKit/PrivacyInfo.xcprivacy` declares this. Camera permission
+stays the host app's responsibility.
 
 ## Attribution
 
 The camera-orientation transform follows Apple's *Visualizing a Point Cloud
-Using Scene Depth* sample. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)
-for its copyright and permission notice.
+Using Scene Depth* sample. The YCbCr conversion uses the coefficients documented
+for full-range camera capture. See
+[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) for details.
 
 ## License
 

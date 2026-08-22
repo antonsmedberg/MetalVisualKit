@@ -2,9 +2,13 @@
 //  PointCloudRenderer.swift
 //  MetalVisualKit
 //
-//  Live mode samples ARKit's sceneDepth map inside the vertex shader and
-//  unprojects to world space on the GPU. Demo mode draws a procedural cloud so
-//  the component still shows something in previews and on non-LiDAR hardware.
+//  Live mode samples ARKit's sceneDepth map inside the vertex shader, unprojects
+//  to world space on the GPU, and colours each point from the camera image of
+//  the same frame. Demo mode draws a procedural cloud so the component still
+//  shows something in previews and on non-LiDAR hardware.
+//
+//  Texture conversion lives in ARFrameTextures, session state in
+//  PointCloudSessionMonitor. What stays here is the draw loop.
 //
 
 import ARKit
@@ -36,6 +40,9 @@ final class PointCloudRenderer: NSObject, MTKViewDelegate {
 
     let source: PointCloudSource
     var maxDepth: Float = 5
+    /// Requested colouring. Falls back to ``PointCloudColorMode/depth`` for any
+    /// frame whose camera image cannot be bound.
+    var colorMode: PointCloudColorMode = .camera
     /// Live sprite size in layout points at one metre. More distant samples
     /// shrink with perspective in the vertex shader.
     var livePointSize: Float = 8
@@ -43,19 +50,24 @@ final class PointCloudRenderer: NSObject, MTKViewDelegate {
     /// Pushed in from the SwiftUI layer, which reads it on the main actor.
     /// The renderer must not touch `UIApplication` from the draw callback.
     var interfaceOrientation: UIInterfaceOrientation = .portrait
+    /// Forwarded from the session monitor. Set by the SwiftUI bridge.
+    var onSessionStatusChange: ((PointCloudSessionMonitor.Status) -> Void)? {
+        get { sessionMonitor.onChange }
+        set { sessionMonitor.onChange = newValue }
+    }
 
     private let device: MTLDevice
     private let queue: MTLCommandQueue
     private let pipeline: MTLRenderPipelineState
     private let depthState: MTLDepthStencilState
-    private var textureCache: CVMetalTextureCache?
+    private let textures: ARFrameTextures?
+    private let sessionMonitor = PointCloudSessionMonitor()
 
     private(set) var session: ARSession?
     private var viewportSize: CGSize = .zero
     private var viewportPointSize: CGSize = .zero
     private let demoPointCount = 24_000
     private let demoPointSize: Float = 2.6
-    private var cachedFallbackConfidence: MTLTexture?
     private var lastRenderedFrameTimestamp: TimeInterval = -1
     private var isActive = false
     private var lastFrameTime = CACurrentMediaTime()
@@ -108,14 +120,14 @@ final class PointCloudRenderer: NSObject, MTKViewDelegate {
         self.queue = queue
         self.pipeline = try device.makeRenderPipelineState(descriptor: descriptor)
         self.depthState = depthState
+        self.textures = Self.requiresTextureCache(for: resolved)
+            ? try ARFrameTextures(device: device)
+            : nil
 
         super.init()
 
-        if Self.requiresTextureCache(for: resolved) {
-            let cacheStatus = CVMetalTextureCacheCreate(nil, nil, device, nil, &textureCache)
-            guard cacheStatus == kCVReturnSuccess, textureCache != nil else {
-                throw MetalVisualError.textureCacheUnavailable(status: cacheStatus)
-            }
+        sessionMonitor.configurationForRestart = { [weak self] in
+            self?.makeConfiguration() ?? ARWorldTrackingConfiguration()
         }
         // setActive(true) starts the camera only when the view is active.
     }
@@ -132,11 +144,15 @@ final class PointCloudRenderer: NSObject, MTKViewDelegate {
             ARWorldTrackingConfiguration.supportsFrameSemantics(.smoothedSceneDepth)
             ? .smoothedSceneDepth
             : .sceneDepth
+        // Left at ARKit's default video format on purpose. Depth and camera
+        // textures are sampled against one another by this renderer.
         return configuration
     }
 
     private func startSession() {
         let session = self.session ?? ARSession()
+        // delegateQueue stays nil, so ARKit calls the monitor on the main queue.
+        session.delegate = sessionMonitor
         session.run(makeConfiguration())
         self.session = session
         MetalVisualLog.renderer.info("ARSession started with scene depth.")
@@ -167,87 +183,10 @@ final class PointCloudRenderer: NSObject, MTKViewDelegate {
         }
     }
 
-    // MARK: - Texture helpers
-
-    /// A Metal texture together with the Core Video wrapper that owns its
-    /// backing IOSurface.
-    ///
-    /// The Core Video wrapper must stay alive while Metal reads its IOSurface.
-    private struct TextureBinding {
-        let cvTexture: CVMetalTexture
-        let texture: MTLTexture
-    }
-
-    private func makeBinding(
-        _ pixelBuffer: CVPixelBuffer,
-        format: MTLPixelFormat
-    ) -> TextureBinding? {
-        guard let textureCache else { return nil }
-        var cvTexture: CVMetalTexture?
-        let width = CVPixelBufferGetWidth(pixelBuffer)
-        let height = CVPixelBufferGetHeight(pixelBuffer)
-        let status = CVMetalTextureCacheCreateTextureFromImage(
-            nil, textureCache, pixelBuffer, nil, format, width, height, 0, &cvTexture
-        )
-        guard status == kCVReturnSuccess,
-              let cvTexture,
-              let texture = CVMetalTextureGetTexture(cvTexture)
-        else {
-            MetalVisualLog.renderer.error("Depth texture creation failed (CVReturn \(status)).")
-            return nil
-        }
-        return TextureBinding(cvTexture: cvTexture, texture: texture)
-    }
-
-    /// Metal format for a Core Video buffer, or `nil` if ARKit handed us
-    /// something this renderer does not know how to interpret. Guessing here
-    /// would mean reinterpreting bytes and rendering plausible garbage.
-    private func metalFormat(for pixelBuffer: CVPixelBuffer) -> MTLPixelFormat? {
-        switch CVPixelBufferGetPixelFormatType(pixelBuffer) {
-        case kCVPixelFormatType_DepthFloat32, kCVPixelFormatType_OneComponent32Float:
-            return .r32Float
-        case kCVPixelFormatType_OneComponent8:
-            return .r8Uint
-        default:
-            return nil
-        }
-    }
-
-    /// Stand-in confidence texture used when ARKit supplies depth without a
-    /// confidence map, which `confidenceMap` documents as possible. Every texel
-    /// reads as high confidence, so depth still renders instead of the view
-    /// going blank.
-    private func fallbackConfidenceTexture(width: Int, height: Int) -> MTLTexture? {
-        if let cached = cachedFallbackConfidence,
-           cached.width == width, cached.height == height {
-            return cached
-        }
-        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
-            pixelFormat: .r8Uint, width: width, height: height, mipmapped: false
-        )
-        descriptor.usage = .shaderRead
-        descriptor.storageMode = .shared
-        guard let texture = device.makeTexture(descriptor: descriptor) else { return nil }
-        let bytes = [UInt8](repeating: 2, count: width * height)   // ARConfidenceLevel.high
-        bytes.withUnsafeBytes { buffer in
-            guard let base = buffer.baseAddress else { return }
-            texture.replace(
-                region: MTLRegionMake2D(0, 0, width, height),
-                mipmapLevel: 0,
-                withBytes: base,
-                bytesPerRow: width
-            )
-        }
-        cachedFallbackConfidence = texture
-        return texture
-    }
-
     // MARK: - MTKViewDelegate
 
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
         viewportSize = size
-        // ARKit projection uses viewport points, not drawable pixels.
-        viewportPointSize = view.bounds.size
         // A rotation can change the drawable without SwiftUI re-running
         // updateUIView, so the projection would otherwise use a stale orientation.
         if let scene = view.window?.windowScene {
@@ -256,6 +195,11 @@ final class PointCloudRenderer: NSObject, MTKViewDelegate {
     }
 
     func draw(in view: MTKView) {
+        // During a rotation the drawable can change before bounds settle. Read
+        // both here so ARKit projection never uses a viewport one frame stale.
+        viewportSize = view.drawableSize
+        viewportPointSize = view.bounds.size
+
         // Nothing useful can be encoded into a zero-sized drawable, and SwiftUI
         // produces those routinely during transitions and navigation.
         guard viewportSize.width > 0, viewportSize.height > 0 else { return }
@@ -306,6 +250,8 @@ final class PointCloudRenderer: NSObject, MTKViewDelegate {
         // or encoder creation had failed.
         if let liveFrame {
             lastRenderedFrameTimestamp = liveFrame.timestamp
+            // ARKit recycles its buffer pool; drop cache mappings no longer used.
+            textures?.flush()
         }
     }
 
@@ -315,44 +261,10 @@ final class PointCloudRenderer: NSObject, MTKViewDelegate {
         let uniforms: CloudUniforms
         let depthTexture: MTLTexture
         let confidenceTexture: MTLTexture
+        let cameraLumaTexture: MTLTexture?
+        let cameraChromaTexture: MTLTexture?
         let vertexCount: Int
         let retainedTextures: [CVMetalTexture]
-    }
-
-    /// Confidence input paired with the Core Video wrapper that must stay alive
-    /// until rendering completes. The fallback texture is owned by the renderer,
-    /// so it has no wrapper to retain per frame.
-    private struct ConfidenceBinding {
-        let texture: MTLTexture
-        let retainedTexture: CVMetalTexture?
-    }
-
-    private func prepareConfidence(
-        from depthData: ARDepthData,
-        matching depthTexture: MTLTexture
-    ) -> ConfidenceBinding? {
-        guard let confidenceMap = depthData.confidenceMap else {
-            guard let fallback = fallbackConfidenceTexture(
-                width: depthTexture.width,
-                height: depthTexture.height
-            ) else { return nil }
-            return ConfidenceBinding(texture: fallback, retainedTexture: nil)
-        }
-
-        guard let confidenceFormat = metalFormat(for: confidenceMap),
-              confidenceFormat == .r8Uint,
-              let binding = makeBinding(confidenceMap, format: .r8Uint)
-        else {
-            MetalVisualLog.renderer.error("Unsupported confidence format; frame skipped.")
-            return nil
-        }
-        guard binding.texture.width == depthTexture.width,
-              binding.texture.height == depthTexture.height
-        else {
-            MetalVisualLog.renderer.error("Depth and confidence dimensions disagree.")
-            return nil
-        }
-        return ConfidenceBinding(texture: binding.texture, retainedTexture: binding.cvTexture)
     }
 
     /// Validates the current AR frame and builds its GPU inputs, or returns nil
@@ -365,6 +277,7 @@ final class PointCloudRenderer: NSObject, MTKViewDelegate {
 
     private func prepareLiveFrame() -> LiveFrame? {
         guard
+            let textures,
             let frame = session?.currentFrame,
             let depthData = frame.smoothedSceneDepth ?? frame.sceneDepth
         else { return nil }
@@ -373,25 +286,32 @@ final class PointCloudRenderer: NSObject, MTKViewDelegate {
         // same frame is pure waste, so skip it.
         guard frame.timestamp != lastRenderedFrameTimestamp else { return nil }
 
-        guard let depthFormat = metalFormat(for: depthData.depthMap), depthFormat == .r32Float
-        else {
-            MetalVisualLog.renderer.error("Unsupported depth pixel format; frame skipped.")
-            return nil
-        }
-        guard let depthBinding = makeBinding(depthData.depthMap, format: .r32Float) else {
-            return nil
-        }
-
-        guard let confidence = prepareConfidence(from: depthData, matching: depthBinding.texture)
-        else { return nil }
+        guard let depthBinding = textures.depth(from: depthData) else { return nil }
+        guard let confidence = textures.confidence(
+            from: depthData,
+            matching: depthBinding.texture
+        ) else { return nil }
         var retained = [depthBinding.cvTexture]
         if let retainedTexture = confidence.retainedTexture {
             retained.append(retainedTexture)
         }
 
+        // Camera colour is optional. A frame whose image cannot be bound still
+        // renders in the depth palette rather than being dropped.
+        var cameraImage: CameraImageBinding?
+        if colorMode == .camera {
+            cameraImage = textures.cameraImage(frame.capturedImage)
+            if let cameraImage {
+                retained.append(contentsOf: cameraImage.retainedTextures)
+            }
+        }
+        let resolvedColorMode: PointCloudColorMode =
+            (colorMode == .camera && cameraImage == nil) ? .depth : colorMode
+
         let uniforms = makeLiveUniforms(
             camera: frame.camera,
             depthTexture: depthBinding.texture,
+            colorMode: resolvedColorMode,
             orientation: interfaceOrientation
         )
 
@@ -400,6 +320,8 @@ final class PointCloudRenderer: NSObject, MTKViewDelegate {
             uniforms: uniforms,
             depthTexture: depthBinding.texture,
             confidenceTexture: confidence.texture,
+            cameraLumaTexture: cameraImage?.luma.texture,
+            cameraChromaTexture: cameraImage?.chroma.texture,
             vertexCount: depthBinding.texture.width * depthBinding.texture.height,
             retainedTextures: retained
         )
@@ -408,6 +330,7 @@ final class PointCloudRenderer: NSObject, MTKViewDelegate {
     private func makeLiveUniforms(
         camera: ARCamera,
         depthTexture: MTLTexture,
+        colorMode: PointCloudColorMode,
         orientation: UIInterfaceOrientation
     ) -> CloudUniforms {
         let projection = camera.projectionMatrix(
@@ -435,6 +358,7 @@ final class PointCloudRenderer: NSObject, MTKViewDelegate {
             viewportPointSize: viewportPointSize
         )
         uniforms.maxDepth = maxDepth
+        uniforms.colorMode = colorMode.shaderValue
         return uniforms
     }
 
@@ -449,6 +373,10 @@ final class PointCloudRenderer: NSObject, MTKViewDelegate {
         encoder.setVertexBytes(&uniforms, length: MemoryLayout<CloudUniforms>.stride, index: 0)
         encoder.setVertexTexture(frame.depthTexture, index: 0)
         encoder.setVertexTexture(frame.confidenceTexture, index: 1)
+        // These remain unbound outside camera mode; the shader branches before
+        // sampling them and the uniform is resolved away from camera when nil.
+        encoder.setVertexTexture(frame.cameraLumaTexture, index: 2)
+        encoder.setVertexTexture(frame.cameraChromaTexture, index: 3)
         encoder.drawPrimitives(type: .point, vertexStart: 0, vertexCount: frame.vertexCount)
     }
 

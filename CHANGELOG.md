@@ -11,6 +11,36 @@ app and DocC archive; both package components also render in an iOS 26.5 simulat
 Live capture has not run on physical LiDAR hardware, so there is no release to
 claim yet.
 
+### Added — camera colour
+
+- Added `PointCloudColorMode` with camera, depth and confidence modes. Camera
+  colour binds the luma and chroma planes from `ARFrame.capturedImage` and
+  converts full-range YCbCr in the vertex shader.
+- Added a segmented colour control and AR session guidance for limited tracking,
+  interruptions and failures.
+- Added tests for planar and non-planar pixel-buffer geometry, colour-mode shader
+  values and session-state messaging.
+
+### Changed — point-cloud structure
+
+- Split the point-cloud bridge, texture binding and session monitoring out of the
+  public SwiftUI view so each file owns one responsibility.
+- Added an iOS 26 Liquid Glass control surface with the existing material as the
+  fallback on earlier deployment targets.
+
+### Fixed — camera and depth path
+
+- Correctly reads whole-buffer dimensions for non-planar depth and confidence
+  buffers while reading per-plane dimensions for the camera image.
+- Falls back to depth colouring when camera planes cannot be bound instead of
+  dropping a valid depth frame.
+- Flushes stale Core Video texture-cache mappings after committed live frames and
+  retains every active wrapper until the GPU completes.
+- Reads the current drawable and layout sizes inside the draw callback to avoid a
+  one-frame stale projection during rotation.
+- Discards nearly transparent point fragments before they can write depth and
+  occlude points behind them.
+
 ### Changed
 
 - Added a committed demo Xcode workspace and shared `MetalVisualKitDemo` scheme

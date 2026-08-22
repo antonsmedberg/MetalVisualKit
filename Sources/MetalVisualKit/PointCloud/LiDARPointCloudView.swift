@@ -2,289 +2,15 @@
 //  LiDARPointCloudView.swift
 //  MetalVisualKit
 //
-//  SwiftUI layer for the point cloud renderer.
+//  The public component: camera permission, colour mode, depth range, session
+//  status. Rendering is in PointCloudRenderer, the UIKit bridge in
+//  PointCloudMetalView.
 //
 
 import ARKit
-import MetalKit
 import SwiftUI
-import UIKit
 
-// MARK: - Helpers
-
-extension Comparable {
-    func clamped(to range: ClosedRange<Self>) -> Self {
-        min(max(self, range.lowerBound), range.upperBound)
-    }
-}
-
-// MARK: - UIViewRepresentable bridge
-
-struct PointCloudMetalView: UIViewRepresentable {
-    /// Clamped by the caller before it reaches the renderer.
-    static let depthRange: ClosedRange<Float> = 0.5...5
-
-    var source: PointCloudSource
-    var maxDepth: Float
-    var reduceMotion: Bool
-    var isActive: Bool
-    var allowsOrbitInteraction: Bool
-    var rendererFactory: @MainActor (MTKView, PointCloudSource) throws -> PointCloudRenderer = {
-        try PointCloudRenderer(view: $0, source: $1)
-    }
-
-    enum OrbitAccessibilityDirection {
-        case left
-        case right
-        case up
-        case down
-    }
-
-    static func shouldRenderContinuously(
-        source: PointCloudSource,
-        isActive: Bool,
-        reduceMotion: Bool
-    ) -> Bool {
-        isActive && !(source == .demo && reduceMotion)
-    }
-
-    static func shouldEnableOrbit(
-        source: PointCloudSource,
-        allowsOrbitInteraction: Bool
-    ) -> Bool {
-        source == .demo && allowsOrbitInteraction
-    }
-
-    static func accessibilityTranslation(
-        for direction: OrbitAccessibilityDirection
-    ) -> SIMD2<Float> {
-        switch direction {
-        case .left: return SIMD2(-48, 0)
-        case .right: return SIMD2(48, 0)
-        case .up: return SIMD2(0, -48)
-        case .down: return SIMD2(0, 48)
-        }
-    }
-
-    @MainActor
-    static func makeOrbitGestureRecognizer(
-        target: AnyObject?,
-        action: Selector?
-    ) -> UIPanGestureRecognizer {
-        let recognizer = UIPanGestureRecognizer(target: target, action: action)
-        recognizer.isEnabled = false
-        return recognizer
-    }
-
-    @MainActor
-    static func configureOrbitGesture(
-        _ recognizer: UIPanGestureRecognizer?,
-        source: PointCloudSource,
-        allowsOrbitInteraction: Bool
-    ) {
-        recognizer?.isEnabled = shouldEnableOrbit(
-            source: source,
-            allowsOrbitInteraction: allowsOrbitInteraction
-        )
-    }
-
-    @MainActor
-    final class Coordinator: NSObject {
-        var renderer: PointCloudRenderer?
-        weak var view: MTKView?
-        weak var orbitGestureRecognizer: UIPanGestureRecognizer?
-
-        @discardableResult
-        private func updateOrbit(translation: SIMD2<Float>) -> Bool {
-            guard let renderer, let view else { return false }
-            renderer.updateDemoOrbit(translation: translation)
-            if view.isPaused {
-                view.setNeedsDisplay()
-            }
-            return true
-        }
-
-        @objc func handlePan(_ gesture: UIPanGestureRecognizer) {
-            guard gesture.state == .began || gesture.state == .changed,
-                  let view = gesture.view as? MTKView
-            else { return }
-            let delta = gesture.translation(in: view)
-            gesture.setTranslation(.zero, in: view)
-            updateOrbit(
-                translation: SIMD2(Float(delta.x), Float(delta.y))
-            )
-        }
-
-        @objc func rotateLeft() -> Bool {
-            updateOrbit(translation: PointCloudMetalView.accessibilityTranslation(for: .left))
-        }
-
-        @objc func rotateRight() -> Bool {
-            updateOrbit(translation: PointCloudMetalView.accessibilityTranslation(for: .right))
-        }
-
-        @objc func rotateUp() -> Bool {
-            updateOrbit(translation: PointCloudMetalView.accessibilityTranslation(for: .up))
-        }
-
-        @objc func rotateDown() -> Bool {
-            updateOrbit(translation: PointCloudMetalView.accessibilityTranslation(for: .down))
-        }
-
-        var accessibilityActions: [UIAccessibilityCustomAction] {
-            [
-                UIAccessibilityCustomAction(
-                    name: "Rotate left",
-                    target: self,
-                    selector: #selector(rotateLeft)
-                ),
-                UIAccessibilityCustomAction(
-                    name: "Rotate right",
-                    target: self,
-                    selector: #selector(rotateRight)
-                ),
-                UIAccessibilityCustomAction(
-                    name: "Rotate up",
-                    target: self,
-                    selector: #selector(rotateUp)
-                ),
-                UIAccessibilityCustomAction(
-                    name: "Rotate down",
-                    target: self,
-                    selector: #selector(rotateDown)
-                )
-            ]
-        }
-    }
-
-    func makeCoordinator() -> Coordinator { Coordinator() }
-
-    func makeUIView(context: Context) -> MTKView {
-        let view = MTKView(frame: .zero, device: MTLCreateSystemDefaultDevice())
-        context.coordinator.view = view
-        let orbitGestureRecognizer = Self.makeOrbitGestureRecognizer(
-            target: context.coordinator,
-            action: #selector(Coordinator.handlePan)
-        )
-        context.coordinator.orbitGestureRecognizer = orbitGestureRecognizer
-        view.addGestureRecognizer(orbitGestureRecognizer)
-        attachRenderer(to: view, coordinator: context.coordinator)
-        return view
-    }
-
-    func configureDrawingMode(
-        _ view: MTKView,
-        source: PointCloudSource,
-        coordinator: Coordinator
-    ) {
-        let continuous = Self.shouldRenderContinuously(
-            source: source,
-            isActive: isActive,
-            reduceMotion: reduceMotion
-        )
-        view.enableSetNeedsDisplay = !continuous
-        view.isPaused = !continuous
-        let orbitEnabled = Self.shouldEnableOrbit(
-            source: source,
-            allowsOrbitInteraction: allowsOrbitInteraction
-        )
-        Self.configureOrbitGesture(
-            coordinator.orbitGestureRecognizer,
-            source: source,
-            allowsOrbitInteraction: allowsOrbitInteraction
-        )
-        view.isAccessibilityElement = true
-        view.accessibilityLabel = source == .live ? "Live depth point cloud" : "Demo point cloud"
-        view.accessibilityHint = orbitEnabled
-            ? "Use the custom actions to rotate the cloud."
-            : nil
-        view.accessibilityCustomActions = orbitEnabled ? coordinator.accessibilityActions : nil
-        if isActive && !continuous {
-            view.setNeedsDisplay()
-        }
-    }
-
-    /// Builds a renderer for the current source and attaches it, tearing down
-    /// any previous one first.
-    private func attachRenderer(to view: MTKView, coordinator: Coordinator) {
-        coordinator.renderer?.setActive(false)
-        view.delegate = nil
-        coordinator.renderer = nil
-        Self.configureOrbitGesture(
-            coordinator.orbitGestureRecognizer,
-            source: source,
-            allowsOrbitInteraction: false
-        )
-        view.accessibilityHint = nil
-        view.accessibilityCustomActions = nil
-        do {
-            let renderer = try rendererFactory(view, source)
-            // Apply lifecycle state before the delegate is attached, so no
-            // frame is drawn — and no AR session started — for a scene that is
-            // not active yet.
-            renderer.maxDepth = maxDepth.clamped(to: PointCloudMetalView.depthRange)
-            renderer.motionScale = reduceMotion ? 0 : 1
-            renderer.setActive(isActive)
-            view.delegate = renderer
-            coordinator.renderer = renderer
-            configureDrawingMode(view, source: renderer.source, coordinator: coordinator)
-        } catch {
-            Self.configureOrbitGesture(
-                coordinator.orbitGestureRecognizer,
-                source: source,
-                allowsOrbitInteraction: false
-            )
-            MetalVisualLog.renderer.error(
-                "PointCloudRenderer failed to initialise: \(String(describing: error), privacy: .public)"
-            )
-            view.isPaused = true
-            view.enableSetNeedsDisplay = true
-        }
-    }
-
-    func updateUIView(_ uiView: MTKView, context: Context) {
-        // SwiftUI reuses the same MTKView across updates and does not call
-        // makeUIView again, but `source` is fixed at renderer construction. When
-        // camera permission is granted or revoked the resolved source flips, so
-        // the renderer has to be rebuilt or the view stays stuck on the old one
-        // — demo forever after permission is granted, or a live session running
-        // after it is revoked.
-        if context.coordinator.renderer?.source != source {
-            attachRenderer(to: uiView, coordinator: context.coordinator)
-            return
-        }
-
-        let renderer = context.coordinator.renderer
-        renderer?.maxDepth = maxDepth.clamped(to: PointCloudMetalView.depthRange)
-        renderer?.motionScale = reduceMotion ? 0 : 1
-        if let orientation = uiView.window?.windowScene?.interfaceOrientation {
-            renderer?.interfaceOrientation = orientation
-        }
-
-        // Releasing the camera when the scene leaves the foreground is not
-        // optional for an ARSession — it keeps running otherwise. setActive is
-        // idempotent, so this does nothing on an ordinary state change.
-        renderer?.setActive(isActive)
-        configureDrawingMode(
-            uiView,
-            source: renderer?.source ?? source,
-            coordinator: context.coordinator
-        )
-    }
-
-    static func dismantleUIView(_ uiView: MTKView, coordinator: Coordinator) {
-        coordinator.renderer?.pause()
-        coordinator.orbitGestureRecognizer?.isEnabled = false
-        coordinator.orbitGestureRecognizer = nil
-        coordinator.view = nil
-        uiView.isPaused = true
-        uiView.delegate = nil
-        uiView.accessibilityCustomActions = nil
-    }
-}
-
-// MARK: - Public component
-
+/// Identity for the permission task, so it restarts when either input changes.
 struct CameraTaskKey: Equatable {
     let mode: LiDARPointCloudView.DisplayMode
     let phase: ScenePhase
@@ -294,10 +20,13 @@ struct CameraTaskKey: Equatable {
 ///
 /// Every point is unprojected on the GPU: the ARKit depth map is bound as a
 /// texture to the vertex shader, so roughly 49,000 points are placed in world
-/// space without any per-point CPU work.
+/// space without any per-point CPU work. In the default
+/// ``PointCloudColorMode/camera`` mode each point also samples the camera image
+/// from the same frame, so the cloud shows the room in its own colours rather
+/// than a false-colour gradient.
 ///
 /// ```swift
-/// LiDARPointCloudView(displayMode: .live)
+/// LiDARPointCloudView(displayMode: .live, colorMode: .camera)
 /// ```
 ///
 /// On hardware without a LiDAR scanner — and in the simulator and in previews —
@@ -328,27 +57,33 @@ public struct LiDARPointCloudView: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
-    @State private var maxDepth: Float = 5
 
     /// LiDAR on iPhone and iPad resolves reliably to roughly five metres. A
     /// 1-10 m slider let the colormap normalise against a range the sensor
     /// never fills, washing out the near field for no benefit.
+    @State private var maxDepth: Float = 5
+    @State private var colorMode: PointCloudColorMode
     @State private var cameraState: CameraAccess.State = CameraAccess.current
+    @State private var sessionStatus: PointCloudSessionMonitor.Status = .starting
 
     /// - Parameters:
     ///   - displayMode: Source to draw from. Defaults to ``DisplayMode/live``.
-    ///   - showsControls: Whether to overlay the depth-range slider.
+    ///   - colorMode: Initial colouring. Defaults to
+    ///     ``PointCloudColorMode/camera``; the controls can change it afterwards.
+    ///   - showsControls: Whether to overlay the colour picker and depth slider.
     ///   - allowsOrbitInteraction: Whether the procedural cloud accepts pan and
     ///     VoiceOver rotation actions. Defaults to `false` so fallback does not
     ///     compete with gestures owned by a host view.
     public init(
         displayMode: DisplayMode = .live,
+        colorMode: PointCloudColorMode = .camera,
         showsControls: Bool = true,
         allowsOrbitInteraction: Bool = false
     ) {
         self.displayMode = displayMode
         self.showsControls = showsControls
         self.allowsOrbitInteraction = allowsOrbitInteraction
+        _colorMode = State(initialValue: colorMode)
     }
 
     private var isLive: Bool {
@@ -383,10 +118,16 @@ public struct LiDARPointCloudView: View {
             PointCloudMetalView(
                 source: source,
                 maxDepth: maxDepth,
+                colorMode: colorMode,
                 reduceMotion: reduceMotion,
                 isActive: scenePhase == .active,
-                allowsOrbitInteraction: allowsOrbitInteraction
+                allowsOrbitInteraction: allowsOrbitInteraction,
+                onSessionStatusChange: { sessionStatus = $0 }
             )
+
+            if isLive, let message = sessionStatus.message {
+                statusBanner(message)
+            }
 
             if showsControls {
                 controls
@@ -403,9 +144,27 @@ public struct LiDARPointCloudView: View {
         }
     }
 
+    // MARK: - Overlays
+
+    private func statusBanner(_ message: String) -> some View {
+        VStack {
+            Label(message, systemImage: "viewfinder")
+                .font(.footnote)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+                .controlSurface(cornerRadius: 16)
+                .padding(.top, 12)
+                .transition(.opacity)
+            Spacer()
+        }
+        .allowsHitTesting(false)
+        .animation(.easeInOut(duration: 0.2), value: message)
+    }
+
     @ViewBuilder
     private var controls: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 12) {
             if let fallbackReason {
                 VStack(spacing: 5) {
                     Label(fallbackReason, systemImage: "info.circle")
@@ -420,6 +179,14 @@ public struct LiDARPointCloudView: View {
             }
 
             if isLive {
+                Picker("Point colour", selection: $colorMode) {
+                    ForEach(PointCloudColorMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .accessibilityLabel(Text("Point colour source"))
+
                 HStack(spacing: 12) {
                     Image(systemName: "arrow.left.and.right")
                         .accessibilityHidden(true)
@@ -436,20 +203,30 @@ public struct LiDARPointCloudView: View {
             }
         }
         .padding(14)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18))
+        .controlSurface(cornerRadius: 22)
         .padding(.horizontal, 20)
         .padding(.bottom, 12)
     }
 }
 
-// MARK: - Previews
+private extension View {
+    @ViewBuilder
+    func controlSurface(cornerRadius: CGFloat) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        if #available(iOS 26.0, *) {
+            self.glassEffect(.regular, in: shape)
+        } else {
+            self.background(.ultraThinMaterial, in: shape)
+        }
+    }
+}
 
 #Preview("Point cloud — demo source") {
     LiDARPointCloudView(displayMode: .demo)
         .preferredColorScheme(.dark)
 }
 
-#Preview("Point cloud — live (device only)") {
-    LiDARPointCloudView(displayMode: .live)
+#Preview("Point cloud — live device") {
+    LiDARPointCloudView(displayMode: .live, colorMode: .camera)
         .preferredColorScheme(.dark)
 }
