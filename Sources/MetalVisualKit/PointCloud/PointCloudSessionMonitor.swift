@@ -21,6 +21,8 @@ final class PointCloudSessionMonitor: NSObject, ARSessionDelegate {
     enum Status: Equatable {
         /// Running and tracking normally. Nothing to show.
         case tracking
+        /// ARKit is building or restoring the world-tracking state.
+        case preparing(String)
         /// Usable but degraded, with guidance the user can act on.
         case limited(String)
         /// The camera was taken away — a call, another app, backgrounding.
@@ -30,16 +32,22 @@ final class PointCloudSessionMonitor: NSObject, ARSessionDelegate {
 
         /// Where a monitor sits before ARKit has reported anything. Named so
         /// the view's initial state cannot drift from the monitor's.
-        static let starting = Status.limited("Starting the camera…")
+        static let starting = Status.preparing("Starting the camera…")
 
         /// The line to show, or nil when there is nothing worth saying.
         var message: String? {
             switch self {
             case .tracking: return nil
+            case .preparing(let guidance): return guidance
             case .limited(let guidance): return guidance
             case .interrupted: return "Camera paused — another app is using it."
             case .failed(let reason): return reason
             }
+        }
+
+        var isPreparing: Bool {
+            if case .preparing = self { return true }
+            return false
         }
     }
 
@@ -55,6 +63,16 @@ final class PointCloudSessionMonitor: NSObject, ARSessionDelegate {
 
     /// Configuration to re-run after an interruption ends.
     var configurationForRestart: (() -> ARConfiguration)?
+
+    /// Publishes a fresh preparing state whenever capture starts or resumes,
+    /// even when the prior session had already reached normal tracking.
+    func prepareForStart() {
+        if status == .starting {
+            onChange?(.starting)
+        } else {
+            status = .starting
+        }
+    }
 
     // MARK: - ARSessionObserver
 
@@ -80,7 +98,7 @@ final class PointCloudSessionMonitor: NSObject, ARSessionDelegate {
         if let configuration = configurationForRestart?() {
             session.run(configuration, options: [.resetTracking, .removeExistingAnchors])
         }
-        status = .limited("Move the device to re-establish tracking.")
+        status = .preparing("Move the device to re-establish tracking.")
     }
 
     // MARK: - Mapping
@@ -94,13 +112,13 @@ final class PointCloudSessionMonitor: NSObject, ARSessionDelegate {
         case .notAvailable:
             return .starting
         case .limited(.initializing):
-            return .limited("Move the device slowly to start tracking.")
+            return .preparing("Move the device slowly to start tracking.")
         case .limited(.excessiveMotion):
             return .limited("Slow down — the device is moving too fast.")
         case .limited(.insufficientFeatures):
             return .limited("Point at a surface with more detail.")
         case .limited(.relocalizing):
-            return .limited("Re-establishing tracking…")
+            return .preparing("Re-establishing tracking…")
         case .limited:
             return .limited("Tracking is limited.")
         }

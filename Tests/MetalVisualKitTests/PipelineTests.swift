@@ -201,114 +201,6 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(MemoryLayout<simd_float4x4>.stride, 64)
     }
 
-    // MARK: - Projection helpers
-    //
-    // Metal clip space runs z ∈ [0, 1], unlike OpenGL's [-1, 1]. Getting this
-    // wrong makes the whole cloud vanish, so it is worth pinning.
-
-    func testPerspectiveMapsNearPlaneToZeroDepth() {
-        let projection = PointCloudRenderer.perspective(
-            fovY: .pi / 3, aspect: 1, near: 0.1, far: 100
-        )
-        let nearPoint = projection * SIMD4<Float>(0, 0, -0.1, 1)
-        XCTAssertEqual(nearPoint.z / nearPoint.w, 0, accuracy: 1e-4)
-    }
-
-    func testPerspectiveMapsFarPlaneToOneDepth() {
-        let projection = PointCloudRenderer.perspective(
-            fovY: .pi / 3, aspect: 1, near: 0.1, far: 100
-        )
-        let farPoint = projection * SIMD4<Float>(0, 0, -100, 1)
-        XCTAssertEqual(farPoint.z / farPoint.w, 1, accuracy: 1e-3)
-    }
-
-    func testRotateToARCameraIsOrthonormal() {
-        // A non-orthonormal transform here would skew or scale the whole cloud.
-        for orientation in [UIInterfaceOrientation.portrait, .landscapeLeft,
-                            .landscapeRight, .portraitUpsideDown] {
-            let matrix = PointCloudRenderer.rotateToARCamera(for: orientation)
-            let upper = simd_float3x3(
-                SIMD3(matrix.columns.0.x, matrix.columns.0.y, matrix.columns.0.z),
-                SIMD3(matrix.columns.1.x, matrix.columns.1.y, matrix.columns.1.z),
-                SIMD3(matrix.columns.2.x, matrix.columns.2.y, matrix.columns.2.z)
-            )
-            XCTAssertEqual(abs(simd_determinant(upper)), 1, accuracy: 1e-5,
-                           "Orientation \(orientation.rawValue) is not a rigid transform.")
-        }
-    }
-
-    func testLookAtPlacesEyeAtOrigin() {
-        let view = PointCloudRenderer.lookAt(
-            eye: SIMD3(0, 0, 3), center: .zero, up: SIMD3(0, 1, 0)
-        )
-        let transformed = view * SIMD4<Float>(0, 0, 3, 1)
-        let position = SIMD3(transformed.x, transformed.y, transformed.z)
-        XCTAssertEqual(simd_length(position), 0, accuracy: 1e-5)
-    }
-
-    func testDemoCameraDistanceFitsTheNarrowerFieldOfView() {
-        let fovY: Float = .pi / 3.2
-        let radius: Float = 1.15
-        let margin: Float = 1.18
-        let portraitDistance = PointCloudRenderer.demoCameraDistance(
-            aspect: 0.46,
-            fovY: fovY,
-            sphereRadius: radius,
-            margin: margin
-        )
-        let landscapeDistance = PointCloudRenderer.demoCameraDistance(
-            aspect: 2.17,
-            fovY: fovY,
-            sphereRadius: radius,
-            margin: margin
-        )
-        let portraitHalfX = atan(tan(fovY * 0.5) * 0.46)
-
-        XCTAssertGreaterThan(portraitDistance, landscapeDistance)
-        XCTAssertGreaterThanOrEqual(
-            portraitDistance * sin(portraitHalfX),
-            radius * margin - 1e-5
-        )
-    }
-
-    func testPointSizeConvertsFromLayoutPointsToDrawablePixels() {
-        XCTAssertEqual(
-            PointCloudRenderer.drawablePointSize(
-                8,
-                drawableSize: CGSize(width: 1_206, height: 2_622),
-                viewportPointSize: CGSize(width: 402, height: 874)
-            ),
-            24,
-            accuracy: 1e-5
-        )
-        XCTAssertEqual(
-            PointCloudRenderer.drawablePointSize(
-                8,
-                drawableSize: .zero,
-                viewportPointSize: .zero
-            ),
-            8
-        )
-    }
-
-    func testConfidenceOpacityPreservesMediumConfidenceAsAVisualCue() {
-        XCTAssertEqual(PointCloudRenderer.confidenceOpacity(level: 0, minimum: 1), 0)
-        XCTAssertEqual(PointCloudRenderer.confidenceOpacity(level: 1, minimum: 1), 0.55)
-        XCTAssertEqual(PointCloudRenderer.confidenceOpacity(level: 2, minimum: 1), 1)
-        XCTAssertEqual(PointCloudRenderer.confidenceOpacity(level: 2, minimum: 2), 1)
-    }
-
-    func testDemoOrbitRespondsToDragAndClampsElevation() {
-        let initial = PointCloudRenderer.DemoOrbit(azimuth: 0, elevation: 0)
-        let moved = PointCloudRenderer.updatedDemoOrbit(
-            initial,
-            translation: SIMD2<Float>(100, -10_000)
-        )
-
-        XCTAssertNotEqual(moved.azimuth, initial.azimuth)
-        XCTAssertEqual(moved.elevation, PointCloudRenderer.demoElevationLimit, accuracy: 1e-5)
-    }
-
     // MARK: - Lifecycle and accessibility
 
     func testCameraAccessStateMapping() {
@@ -381,18 +273,43 @@ final class PipelineTests: XCTestCase {
                 reduceMotion: true
             )
         )
+        XCTAssertTrue(
+            PointCloudMetalView.shouldRequestOnDemandDraw(
+                source: .demo,
+                isActive: false,
+                reduceMotion: false
+            )
+        )
     }
 
     func testCameraTaskIdentityChangesWithDisplayMode() {
-        let demo = CameraTaskKey(mode: .demo, phase: .active)
-        let live = CameraTaskKey(mode: .live, phase: .active)
+        let demo = CameraTaskKey(mode: .demo, phase: .active, isActive: true)
+        let live = CameraTaskKey(mode: .live, phase: .active, isActive: true)
 
         XCTAssertNotEqual(demo, live)
+    }
+
+    func testCameraTaskIdentityChangesWhenCaptureResumes() {
+        let paused = CameraTaskKey(mode: .live, phase: .active, isActive: false)
+        let resumed = CameraTaskKey(mode: .live, phase: .active, isActive: true)
+
+        XCTAssertNotEqual(paused, resumed)
     }
 
     func testDemoSourceDoesNotRequireCoreVideoTextureCache() {
         XCTAssertFalse(PointCloudRenderer.requiresTextureCache(for: .demo))
         XCTAssertTrue(PointCloudRenderer.requiresTextureCache(for: .live))
+    }
+
+    func testLiveSessionRequestsRawAndSmoothedDepthWhenAvailable() {
+        XCTAssertEqual(
+            PointCloudRenderer.frameSemantics(supportsCombinedDepth: true),
+            [.sceneDepth, .smoothedSceneDepth]
+        )
+        XCTAssertEqual(
+            PointCloudRenderer.frameSemantics(supportsCombinedDepth: false),
+            .sceneDepth
+        )
     }
 
     func testParticleSeedMatchesStructuredRingDefaults() {

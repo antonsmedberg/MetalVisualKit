@@ -23,10 +23,11 @@ The app depends on the package by relative path (`../..`). Xcode therefore shows
 ## Demo states
 
 The loader tab exposes determinate and indeterminate variants plus explicit
-light- and dark-surface previews. The LiDAR tab uses live scene depth when the
-hardware and permission are available, otherwise it presents the orbitable
-procedural cloud with an on-screen reason. The demo opts in to orbit explicitly;
-the package default leaves fallback gestures disabled for safe embedding.
+light- and dark-surface previews. The Spatial Scan tab starts with an orbitable,
+pinch-zoomable procedural cloud and requests camera permission only after **Start
+LiDAR**. Its toolbar and bottom dock expose Start, Pause, Resume and End states;
+live settings include colour, confidence floor and maximum depth. The package
+default still leaves fallback gestures disabled for safe embedding.
 
 The demo accepts deterministic launch arguments for screenshot and regression
 work: `--demo-progress=0.68`, `--demo-spinner`, `--demo-light`, and

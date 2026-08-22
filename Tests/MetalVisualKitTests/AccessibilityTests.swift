@@ -74,6 +74,53 @@ final class AccessibilityTests: XCTestCase {
     }
 
     @MainActor
+    func testDemoZoomRecognizerRequiresExplicitOrbitOptIn() {
+        let coordinator = PointCloudMetalView.Coordinator()
+        let recognizer = PointCloudMetalView.makeZoomGestureRecognizer(
+            target: coordinator,
+            action: #selector(PointCloudMetalView.Coordinator.handlePinch)
+        )
+
+        PointCloudMetalView.configureZoomGesture(
+            recognizer,
+            source: .demo,
+            allowsOrbitInteraction: false
+        )
+        XCTAssertFalse(recognizer.isEnabled)
+
+        PointCloudMetalView.configureZoomGesture(
+            recognizer,
+            source: .demo,
+            allowsOrbitInteraction: true
+        )
+        XCTAssertTrue(recognizer.isEnabled)
+    }
+
+    @MainActor
+    func testBridgeAppliesConfidenceFloorToRenderer() throws {
+        let metalView = MTKView(frame: .zero, device: MTLCreateSystemDefaultDevice())
+        let renderer = try PointCloudRenderer(view: metalView, source: .demo)
+        let bridge = PointCloudMetalView(
+            source: .demo,
+            maxDepth: 5,
+            colorMode: .camera,
+            minimumConfidence: .precise,
+            reduceMotion: false,
+            isActive: true,
+            allowsOrbitInteraction: false,
+            rendererFactory: { _, _ in renderer }
+        )
+        let host = UIHostingController(rootView: bridge.frame(width: 240, height: 240))
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 240, height: 240))
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        host.view.layoutIfNeeded()
+
+        XCTAssertEqual(renderer.minimumConfidence, .precise)
+    }
+
+    @MainActor
     func testDismantleDisablesOwnedOrbitAndClearsActions() {
         let view = MTKView()
         let coordinator = PointCloudMetalView.Coordinator()

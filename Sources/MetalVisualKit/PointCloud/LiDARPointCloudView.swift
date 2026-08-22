@@ -14,6 +14,7 @@ import SwiftUI
 struct CameraTaskKey: Equatable {
     let mode: LiDARPointCloudView.DisplayMode
     let phase: ScenePhase
+    let isActive: Bool
 }
 
 /// A live 3D visualisation of the LiDAR depth map.
@@ -54,6 +55,8 @@ public struct LiDARPointCloudView: View {
     private let displayMode: DisplayMode
     private let showsControls: Bool
     private let allowsOrbitInteraction: Bool
+    private let isActive: Bool
+    private let onPhaseChange: (LiDARPointCloudPhase) -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
@@ -63,6 +66,7 @@ public struct LiDARPointCloudView: View {
     /// never fills, washing out the near field for no benefit.
     @State private var maxDepth: Float = 5
     @State private var colorMode: PointCloudColorMode
+    @State private var minimumConfidence: PointCloudConfidenceFloor
     @State private var cameraState: CameraAccess.State = CameraAccess.current
     @State private var sessionStatus: PointCloudSessionMonitor.Status = .starting
 
@@ -70,20 +74,31 @@ public struct LiDARPointCloudView: View {
     ///   - displayMode: Source to draw from. Defaults to ``DisplayMode/live``.
     ///   - colorMode: Initial colouring. Defaults to
     ///     ``PointCloudColorMode/camera``; the controls can change it afterwards.
+    ///   - minimumConfidence: Initial geometry-quality floor. Defaults to
+    ///     ``PointCloudConfidenceFloor/balanced``.
     ///   - showsControls: Whether to overlay the colour picker and depth slider.
+    ///   - isActive: Whether live capture may run. Set this to `false` to pause
+    ///     the AR session while keeping the view in the hierarchy.
+    ///   - onPhaseChange: Called when the resolved capture or fallback state changes.
     ///   - allowsOrbitInteraction: Whether the procedural cloud accepts pan and
     ///     VoiceOver rotation actions. Defaults to `false` so fallback does not
     ///     compete with gestures owned by a host view.
     public init(
         displayMode: DisplayMode = .live,
         colorMode: PointCloudColorMode = .camera,
+        minimumConfidence: PointCloudConfidenceFloor = .balanced,
         showsControls: Bool = true,
-        allowsOrbitInteraction: Bool = false
+        allowsOrbitInteraction: Bool = false,
+        isActive: Bool = true,
+        onPhaseChange: @escaping (LiDARPointCloudPhase) -> Void = { _ in }
     ) {
         self.displayMode = displayMode
         self.showsControls = showsControls
         self.allowsOrbitInteraction = allowsOrbitInteraction
+        self.isActive = isActive
+        self.onPhaseChange = onPhaseChange
         _colorMode = State(initialValue: colorMode)
+        _minimumConfidence = State(initialValue: minimumConfidence)
     }
 
     private var isLive: Bool {
@@ -113,20 +128,65 @@ public struct LiDARPointCloudView: View {
         isLive ? .live : .demo
     }
 
+    private var captureIsActive: Bool {
+        isActive && scenePhase == .active
+    }
+
+    private var currentPhase: LiDARPointCloudPhase {
+        Self.phase(
+            isActive: captureIsActive,
+            fallbackReason: fallbackReason,
+            status: sessionStatus
+        )
+    }
+
+    static func phase(
+        isActive: Bool,
+        fallbackReason: String?,
+        status: PointCloudSessionMonitor.Status
+    ) -> LiDARPointCloudPhase {
+        guard isActive else { return .idle }
+        if let fallbackReason { return .fallback(fallbackReason) }
+        switch status {
+        case .tracking: return .tracking
+        case .preparing(let message): return .preparing(message)
+        case .limited(let message): return .limited(message)
+        case .interrupted: return .interrupted
+        case .failed(let message): return .failed(message)
+        }
+    }
+
+    static func shouldShowSessionOverlay(
+        captureIsActive: Bool,
+        isLive: Bool,
+        message: String?
+    ) -> Bool {
+        captureIsActive && isLive && message != nil
+    }
+
     public var body: some View {
         ZStack(alignment: .bottom) {
             PointCloudMetalView(
                 source: source,
                 maxDepth: maxDepth,
                 colorMode: colorMode,
+                minimumConfidence: minimumConfidence,
                 reduceMotion: reduceMotion,
-                isActive: scenePhase == .active,
+                isActive: captureIsActive,
                 allowsOrbitInteraction: allowsOrbitInteraction,
                 onSessionStatusChange: { sessionStatus = $0 }
             )
 
-            if isLive, let message = sessionStatus.message {
-                statusBanner(message)
+            if Self.shouldShowSessionOverlay(
+                captureIsActive: captureIsActive,
+                isLive: isLive,
+                message: sessionStatus.message
+            ), let message = sessionStatus.message {
+                if sessionStatus.isPreparing {
+                    preparationOverlay(message)
+                } else {
+                    statusBanner(message)
+                }
             }
 
             if showsControls {
@@ -134,10 +194,13 @@ public struct LiDARPointCloudView: View {
             }
         }
         .accessibilityElement(children: .contain)
-        .task(id: CameraTaskKey(mode: displayMode, phase: scenePhase)) {
+        .onChange(of: currentPhase, initial: true) { _, phase in
+            onPhaseChange(phase)
+        }
+        .task(id: CameraTaskKey(mode: displayMode, phase: scenePhase, isActive: isActive)) {
             // Re-checked on every foreground: the user may have changed the
             // setting in Settings and come back.
-            guard displayMode == .live, scenePhase == .active else { return }
+            guard displayMode == .live, isActive, scenePhase == .active else { return }
             let requestedState = await CameraAccess.request()
             guard !Task.isCancelled else { return }
             cameraState = requestedState
@@ -145,6 +208,23 @@ public struct LiDARPointCloudView: View {
     }
 
     // MARK: - Overlays
+
+    private func preparationOverlay(_ message: String) -> some View {
+        VStack(spacing: 12) {
+            ParticleSpinnerView(label: message, surfaceStyle: .dark)
+                .frame(width: 88, height: 88)
+                .accessibilityHidden(true)
+            Text(message)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.white)
+                .multilineTextAlignment(.center)
+        }
+        .padding(18)
+        .controlSurface(cornerRadius: 24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .transition(.scale(scale: 0.96).combined(with: .opacity))
+        .accessibilityElement(children: .combine)
+    }
 
     private func statusBanner(_ message: String) -> some View {
         VStack {
@@ -186,6 +266,14 @@ public struct LiDARPointCloudView: View {
                 }
                 .pickerStyle(.segmented)
                 .accessibilityLabel(Text("Point colour source"))
+
+                Picker("Point quality", selection: $minimumConfidence) {
+                    ForEach(PointCloudConfidenceFloor.allCases) { floor in
+                        Text(floor.title).tag(floor)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .accessibilityLabel(Text("Minimum point confidence"))
 
                 HStack(spacing: 12) {
                     Image(systemName: "arrow.left.and.right")

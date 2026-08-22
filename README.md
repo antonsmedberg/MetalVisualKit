@@ -12,8 +12,9 @@ both exposed as SwiftUI views.
 
 > **Pre-release.** Xcode 26.6 builds the package, the current test suite, the
 > example app and its DocC archive. The loader below ran in an iOS 26.5 simulator.
-> Live capture has not run on physical LiDAR hardware, so the camera-colour path
-> is not yet verified end to end. Nothing is tagged; see [CHANGELOG](CHANGELOG.md).
+> The project owner has exercised live LiDAR on compatible hardware; the updated
+> portrait transform still needs a fresh device regression pass. Nothing is
+> tagged; see [CHANGELOG](CHANGELOG.md).
 
 <p align="center">
   <img src="Media/loader-simulator.png" width="320" alt="MetalVisualKit particle loader running in the iOS simulator">
@@ -116,8 +117,12 @@ LiDARPointCloudView(displayMode: .live, colorMode: .camera)
 LiDARPointCloudView(
     displayMode: .live,
     colorMode: .confidence,
+    minimumConfidence: .precise,
     allowsOrbitInteraction: true
 )
+
+// Pause the AR session without removing the view
+LiDARPointCloudView(displayMode: .live, isActive: false)
 ```
 
 `colorMode` sets the initial colour source. When controls are visible, the
@@ -125,9 +130,9 @@ segmented control can switch between camera, depth and confidence at runtime.
 
 | Mode | Shows | Useful for |
 |---|---|---|
-| `.camera` | Camera colour sampled per point | Reading the reconstructed room |
+| `.camera` | Camera colour sampled per LiDAR point | Reading the live room geometry |
 | `.depth` | Near-to-far gradient | Checking range and geometry |
-| `.confidence` | Amber medium and green high; low samples are hidden | Checking sensor quality |
+| `.confidence` | Red low, amber medium and green high when the selected floor includes them | Checking sensor quality |
 
 The loader draws on a transparent drawable. Dark surfaces use additive glow;
 light surfaces use premultiplied source-over compositing so particles retain
@@ -168,6 +173,15 @@ The point-cloud implementation is split by responsibility:
 
 `PointCloudSessionMonitor` distinguishes normal tracking, limited tracking,
 interruptions and failures so an empty surface is not the only error signal.
+Preparing and relocalizing states use the package's particle spinner, while
+actionable tracking problems remain compact guidance banners.
+
+The live transform follows Apple's point-cloud reference path:
+`inverse(camera.viewMatrix(for: orientation)) × rotateToARCamera`. Using the raw
+camera transform beside an orientation-aware projection can rotate the point cloud
+incorrectly in portrait. Where supported, the session requests both raw and
+smoothed scene depth so the renderer can prefer stable data without losing the
+instantaneous depth path during startup.
 
 ## Accessibility
 
@@ -177,7 +191,8 @@ intact. Settled particle and procedural demo views switch to on-demand drawing
 instead of redrawing static frames. Both components expose accessibility labels;
 the loader also publishes its percentage to VoiceOver. When procedural orbit is
 enabled, the cloud exposes named VoiceOver actions for rotating left, right, up
-and down. The live cloud's accessibility label also identifies its colour mode.
+and down, plus zooming in and out. The live cloud's accessibility label also
+identifies its colour mode.
 
 ## Current rendering defaults
 
@@ -190,8 +205,8 @@ and down. The live cloud's accessibility label also identifies its colour mode.
 | Particle palette | `particleVertex` | surface-aware indigo/cyan arc and sweep head |
 | Colour mode | `LiDARPointCloudView(colorMode:)` | `.camera` |
 | Max scan depth | `LiDARPointCloudView` slider / `maxDepth` | 5 m |
-| Confidence floor | `CloudUniforms.minConfidence` | 1 (raw `ARConfidenceLevel`, drops *low*) |
-| Point size | `CloudUniforms.pointSize` | 8 layout points, scaled to drawable pixels |
+| Confidence floor | `PointCloudConfidenceFloor` | `.balanced` (medium + high) |
+| Point size | `CloudUniforms.pointSize` | 3 layout points, scaled to drawable pixels |
 | Depth colour map | `depthPalette()` in `PointCloudShaders.metal` | blue → cyan → violet → coral |
 | Camera conversion | `cameraColour()` in `PointCloudShaders.metal` | full-range BT.601 → RGB |
 
@@ -207,7 +222,8 @@ and down. The live cloud's accessibility label also identifies its colour mode.
   simulator, `LiDARPointCloudView` falls back to a procedural Fibonacci-sphere
   cloud, so previews and the demo app still show something real.
 - Procedural orbit is opt-in through `allowsOrbitInteraction` so automatic
-  fallback does not compete with gestures owned by a host view.
+  fallback does not compete with gestures owned by a host view. The same opt-in
+  enables bounded pinch zoom.
 - The host app must declare `NSCameraUsageDescription` for live mode.
 
 ## Swift 6 migration
@@ -225,14 +241,11 @@ When the advisory build has no concurrency diagnostics, change
 
 ## Known limitations
 
-- **No physical LiDAR validation yet.** Only the portrait path has been worked
-  through carefully, and no orientation has been confirmed on hardware. Depth
-  registration, camera permission recovery, thermal behaviour and GPU frame time
-  still need device testing. The orientation derivation follows Apple's
-  *Visualizing a Point Cloud Using Scene Depth* sample.
-- **Camera colour is unverified on hardware.** Pixel formats and the conversion
-  matrix follow Apple's documentation, but colour cast, orientation and
-  camera-to-depth registration still need a real-device pass.
+- **Live LiDAR has been exercised by the project owner on a compatible device.**
+  That pass exposed an incorrect portrait transform; this branch aligns
+  `localToWorld` with ARKit's oriented view matrix. Portrait, both landscapes,
+  camera-to-depth registration, thermals and sustained frame time still need a
+  fresh physical-device regression pass before release.
 - **Uniform struct layouts are mirrored by hand** between Swift and MSL. Editing
   one side without the other produces a visual glitch rather than a crash.
   `Scripts/check-struct-parity.py` compares the two declarations directly and
@@ -241,6 +254,22 @@ When the advisory build has no concurrency diagnostics, change
   depth frame, it does not build a persistent scan.
 - No adaptive quality policy. Point density, sprite size and frame rate are
   fixed until device profiling provides data for a useful policy.
+
+## Spatial scanning roadmap
+
+The current Metal point cloud is a live sensor visualizer, not a BIM scanner.
+Apple's supported route to structural room capture is **RoomPlan**, which combines
+the camera, LiDAR and Apple-trained models to identify walls, floors, doors,
+windows, openings and common room objects, then exports parametric data or USDZ.
+`ARWorldTrackingConfiguration.sceneReconstruction` and `ARMeshAnchor` are the
+lower-level route when a custom classified polygon mesh and Metal renderer are
+more important than RoomPlan's parametric output.
+
+The next coherent scan phase is tracked in [ROADMAP.md](ROADMAP.md): explicit
+capture lifecycle, RoomPlan result persistence, USDZ preview/share, then a custom
+post-scan viewer. Monocular depth models are not bundled: LiDAR already provides
+metric depth, and another model would add thermal cost, alignment work and a
+separate model-license obligation without making the result survey- or BIM-grade.
 
 ## Development
 

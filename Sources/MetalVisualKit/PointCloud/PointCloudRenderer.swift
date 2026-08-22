@@ -23,6 +23,8 @@ import simd
 
 final class PointCloudRenderer: NSObject, MTKViewDelegate {
 
+    static let defaultLivePointSize: Float = 3
+
     enum Function {
         static let liveVertex = "pointCloudVertex"
         static let demoVertex = "demoCloudVertex"
@@ -38,14 +40,23 @@ final class PointCloudRenderer: NSObject, MTKViewDelegate {
         source == .live
     }
 
+    static func frameSemantics(
+        supportsCombinedDepth: Bool
+    ) -> ARConfiguration.FrameSemantics {
+        supportsCombinedDepth
+            ? [.sceneDepth, .smoothedSceneDepth]
+            : .sceneDepth
+    }
+
     let source: PointCloudSource
     var maxDepth: Float = 5
     /// Requested colouring. Falls back to ``PointCloudColorMode/depth`` for any
     /// frame whose camera image cannot be bound.
     var colorMode: PointCloudColorMode = .camera
+    var minimumConfidence: PointCloudConfidenceFloor = .balanced
     /// Live sprite size in layout points at one metre. More distant samples
     /// shrink with perspective in the vertex shader.
-    var livePointSize: Float = 8
+    var livePointSize: Float = defaultLivePointSize
     var motionScale: Float = 1
     /// Pushed in from the SwiftUI layer, which reads it on the main actor.
     /// The renderer must not touch `UIApplication` from the draw callback.
@@ -75,6 +86,7 @@ final class PointCloudRenderer: NSObject, MTKViewDelegate {
     /// by the length of a backgrounded interval on the first frame back.
     private var simulationTime: Double = 0
     private var demoOrbit = DemoOrbit(azimuth: 0, elevation: atan(0.12))
+    private var demoZoom: Float = 1
 
     init(view: MTKView, source: PointCloudSource) throws {
         guard let device = view.device ?? MTLCreateSystemDefaultDevice() else {
@@ -140,10 +152,14 @@ final class PointCloudRenderer: NSObject, MTKViewDelegate {
 
     private func makeConfiguration() -> ARWorldTrackingConfiguration {
         let configuration = ARWorldTrackingConfiguration()
-        configuration.frameSemantics =
-            ARWorldTrackingConfiguration.supportsFrameSemantics(.smoothedSceneDepth)
-            ? .smoothedSceneDepth
-            : .sceneDepth
+        let combinedDepth: ARConfiguration.FrameSemantics = [
+            .sceneDepth,
+            .smoothedSceneDepth
+        ]
+        configuration.frameSemantics = Self.frameSemantics(
+            supportsCombinedDepth:
+            ARWorldTrackingConfiguration.supportsFrameSemantics(combinedDepth)
+        )
         // Left at ARKit's default video format on purpose. Depth and camera
         // textures are sampled against one another by this renderer.
         return configuration
@@ -153,6 +169,7 @@ final class PointCloudRenderer: NSObject, MTKViewDelegate {
         let session = self.session ?? ARSession()
         // delegateQueue stays nil, so ARKit calls the monitor on the main queue.
         session.delegate = sessionMonitor
+        sessionMonitor.prepareForStart()
         session.run(makeConfiguration())
         self.session = session
         MetalVisualLog.renderer.info("ARSession started with scene depth.")
@@ -165,6 +182,11 @@ final class PointCloudRenderer: NSObject, MTKViewDelegate {
     func updateDemoOrbit(translation: SIMD2<Float>) {
         guard source == .demo else { return }
         demoOrbit = Self.updatedDemoOrbit(demoOrbit, translation: translation)
+    }
+
+    func updateDemoZoom(pinchScale: Float) {
+        guard source == .demo else { return }
+        demoZoom = Self.updatedDemoZoom(demoZoom, pinchScale: pinchScale)
     }
 
     /// Starts or pauses live capture only when activity changes.
@@ -331,6 +353,7 @@ final class PointCloudRenderer: NSObject, MTKViewDelegate {
         colorMode: PointCloudColorMode,
         orientation: UIInterfaceOrientation
     ) -> CloudUniforms {
+        let viewMatrix = camera.viewMatrix(for: orientation)
         let projection = camera.projectionMatrix(
             for: orientation,
             viewportSize: viewportPointSize == .zero ? viewportSize : viewportPointSize,
@@ -339,8 +362,11 @@ final class PointCloudRenderer: NSObject, MTKViewDelegate {
         )
 
         var uniforms = CloudUniforms()
-        uniforms.viewProjection = projection * camera.viewMatrix(for: orientation)
-        uniforms.localToWorld = camera.transform * Self.rotateToARCamera(for: orientation)
+        uniforms.viewProjection = projection * viewMatrix
+        uniforms.localToWorld = Self.localToWorld(
+            viewMatrix: viewMatrix,
+            orientation: orientation
+        )
         uniforms.intrinsicsInv = camera.intrinsics.inverse
         uniforms.cameraResolution = SIMD2(
             Float(camera.imageResolution.width),
@@ -356,6 +382,7 @@ final class PointCloudRenderer: NSObject, MTKViewDelegate {
             viewportPointSize: viewportPointSize
         )
         uniforms.maxDepth = maxDepth
+        uniforms.minConfidence = minimumConfidence.rawValue
         uniforms.colorMode = colorMode.shaderValue
         return uniforms
     }
@@ -387,7 +414,7 @@ final class PointCloudRenderer: NSObject, MTKViewDelegate {
             fovY: fovY,
             sphereRadius: 1.15,
             margin: 1.18
-        )
+        ) * demoZoom
         let cosElevation = cos(demoOrbit.elevation)
         let eye = SIMD3<Float>(
             sin(demoOrbit.azimuth) * cosElevation * distance,

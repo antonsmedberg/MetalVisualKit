@@ -19,6 +19,7 @@ struct PointCloudMetalView: UIViewRepresentable {
     var source: PointCloudSource
     var maxDepth: Float
     var colorMode: PointCloudColorMode
+    var minimumConfidence: PointCloudConfidenceFloor = .balanced
     var reduceMotion: Bool
     var isActive: Bool
     var allowsOrbitInteraction: Bool
@@ -40,6 +41,18 @@ struct PointCloudMetalView: UIViewRepresentable {
         reduceMotion: Bool
     ) -> Bool {
         isActive && !(source == .demo && reduceMotion)
+    }
+
+    static func shouldRequestOnDemandDraw(
+        source: PointCloudSource,
+        isActive: Bool,
+        reduceMotion: Bool
+    ) -> Bool {
+        !shouldRenderContinuously(
+            source: source,
+            isActive: isActive,
+            reduceMotion: reduceMotion
+        )
     }
 
     static func shouldEnableOrbit(
@@ -71,8 +84,30 @@ struct PointCloudMetalView: UIViewRepresentable {
     }
 
     @MainActor
+    static func makeZoomGestureRecognizer(
+        target: AnyObject?,
+        action: Selector?
+    ) -> UIPinchGestureRecognizer {
+        let recognizer = UIPinchGestureRecognizer(target: target, action: action)
+        recognizer.isEnabled = false
+        return recognizer
+    }
+
+    @MainActor
     static func configureOrbitGesture(
         _ recognizer: UIPanGestureRecognizer?,
+        source: PointCloudSource,
+        allowsOrbitInteraction: Bool
+    ) {
+        recognizer?.isEnabled = shouldEnableOrbit(
+            source: source,
+            allowsOrbitInteraction: allowsOrbitInteraction
+        )
+    }
+
+    @MainActor
+    static func configureZoomGesture(
+        _ recognizer: UIPinchGestureRecognizer?,
         source: PointCloudSource,
         allowsOrbitInteraction: Bool
     ) {
@@ -88,6 +123,7 @@ struct PointCloudMetalView: UIViewRepresentable {
         var failedSource: PointCloudSource?
         weak var view: MTKView?
         weak var orbitGestureRecognizer: UIPanGestureRecognizer?
+        weak var zoomGestureRecognizer: UIPinchGestureRecognizer?
         /// Reassigned on every SwiftUI update so the renderer always reports
         /// into the current view's state rather than a captured stale copy.
         var onSessionStatusChange: (PointCloudSessionMonitor.Status) -> Void = { _ in }
@@ -96,6 +132,16 @@ struct PointCloudMetalView: UIViewRepresentable {
         private func updateOrbit(translation: SIMD2<Float>) -> Bool {
             guard let renderer, let view else { return false }
             renderer.updateDemoOrbit(translation: translation)
+            if view.isPaused {
+                view.setNeedsDisplay()
+            }
+            return true
+        }
+
+        @discardableResult
+        private func updateZoom(scale: Float) -> Bool {
+            guard let renderer, let view else { return false }
+            renderer.updateDemoZoom(pinchScale: scale)
             if view.isPaused {
                 view.setNeedsDisplay()
             }
@@ -113,6 +159,12 @@ struct PointCloudMetalView: UIViewRepresentable {
             )
         }
 
+        @objc func handlePinch(_ gesture: UIPinchGestureRecognizer) {
+            guard gesture.state == .began || gesture.state == .changed else { return }
+            updateZoom(scale: Float(gesture.scale))
+            gesture.scale = 1
+        }
+
         @objc func rotateLeft() -> Bool {
             updateOrbit(translation: PointCloudMetalView.accessibilityTranslation(for: .left))
         }
@@ -127,6 +179,14 @@ struct PointCloudMetalView: UIViewRepresentable {
 
         @objc func rotateDown() -> Bool {
             updateOrbit(translation: PointCloudMetalView.accessibilityTranslation(for: .down))
+        }
+
+        @objc func zoomIn() -> Bool {
+            updateZoom(scale: 1.15)
+        }
+
+        @objc func zoomOut() -> Bool {
+            updateZoom(scale: 0.87)
         }
 
         var accessibilityActions: [UIAccessibilityCustomAction] {
@@ -150,6 +210,16 @@ struct PointCloudMetalView: UIViewRepresentable {
                     name: "Rotate down",
                     target: self,
                     selector: #selector(rotateDown)
+                ),
+                UIAccessibilityCustomAction(
+                    name: "Zoom in",
+                    target: self,
+                    selector: #selector(zoomIn)
+                ),
+                UIAccessibilityCustomAction(
+                    name: "Zoom out",
+                    target: self,
+                    selector: #selector(zoomOut)
                 )
             ]
         }
@@ -167,6 +237,12 @@ struct PointCloudMetalView: UIViewRepresentable {
         )
         context.coordinator.orbitGestureRecognizer = orbitGestureRecognizer
         view.addGestureRecognizer(orbitGestureRecognizer)
+        let zoomGestureRecognizer = Self.makeZoomGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handlePinch)
+        )
+        context.coordinator.zoomGestureRecognizer = zoomGestureRecognizer
+        view.addGestureRecognizer(zoomGestureRecognizer)
         attachRenderer(to: view, coordinator: context.coordinator)
         return view
     }
@@ -192,15 +268,24 @@ struct PointCloudMetalView: UIViewRepresentable {
             source: source,
             allowsOrbitInteraction: allowsOrbitInteraction
         )
+        Self.configureZoomGesture(
+            coordinator.zoomGestureRecognizer,
+            source: source,
+            allowsOrbitInteraction: allowsOrbitInteraction
+        )
         view.isAccessibilityElement = true
         view.accessibilityLabel = source == .live
             ? "Live depth point cloud, coloured by \(colorMode.title.lowercased())"
             : "Demo point cloud"
         view.accessibilityHint = orbitEnabled
-            ? "Use the custom actions to rotate the cloud."
+            ? "Use the custom actions to rotate or zoom the cloud."
             : nil
         view.accessibilityCustomActions = orbitEnabled ? coordinator.accessibilityActions : nil
-        if isActive && !continuous {
+        if Self.shouldRequestOnDemandDraw(
+            source: source,
+            isActive: isActive,
+            reduceMotion: reduceMotion
+        ) {
             view.setNeedsDisplay()
         }
     }
@@ -216,6 +301,11 @@ struct PointCloudMetalView: UIViewRepresentable {
             source: source,
             allowsOrbitInteraction: false
         )
+        Self.configureZoomGesture(
+            coordinator.zoomGestureRecognizer,
+            source: source,
+            allowsOrbitInteraction: false
+        )
         view.accessibilityHint = nil
         view.accessibilityCustomActions = nil
         do {
@@ -225,6 +315,7 @@ struct PointCloudMetalView: UIViewRepresentable {
             // not active yet.
             renderer.maxDepth = maxDepth.clamped(to: PointCloudMetalView.depthRange)
             renderer.colorMode = colorMode
+            renderer.minimumConfidence = minimumConfidence
             renderer.motionScale = reduceMotion ? 0 : 1
             renderer.onSessionStatusChange = { [weak coordinator] status in
                 coordinator?.onSessionStatusChange(status)
@@ -237,6 +328,11 @@ struct PointCloudMetalView: UIViewRepresentable {
         } catch {
             Self.configureOrbitGesture(
                 coordinator.orbitGestureRecognizer,
+                source: source,
+                allowsOrbitInteraction: false
+            )
+            Self.configureZoomGesture(
+                coordinator.zoomGestureRecognizer,
                 source: source,
                 allowsOrbitInteraction: false
             )
@@ -269,6 +365,7 @@ struct PointCloudMetalView: UIViewRepresentable {
         let renderer = context.coordinator.renderer
         renderer?.maxDepth = maxDepth.clamped(to: PointCloudMetalView.depthRange)
         renderer?.colorMode = colorMode
+        renderer?.minimumConfidence = minimumConfidence
         renderer?.motionScale = reduceMotion ? 0 : 1
         if let orientation = uiView.window?.windowScene?.interfaceOrientation {
             renderer?.interfaceOrientation = orientation
@@ -289,7 +386,9 @@ struct PointCloudMetalView: UIViewRepresentable {
         coordinator.renderer?.onSessionStatusChange = nil
         coordinator.renderer?.pause()
         coordinator.orbitGestureRecognizer?.isEnabled = false
+        coordinator.zoomGestureRecognizer?.isEnabled = false
         coordinator.orbitGestureRecognizer = nil
+        coordinator.zoomGestureRecognizer = nil
         coordinator.view = nil
         uiView.isPaused = true
         uiView.delegate = nil

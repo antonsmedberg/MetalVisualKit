@@ -206,13 +206,176 @@ private struct LoaderTab: View {
 // MARK: - Point cloud
 
 private struct CloudTab: View {
+    private enum CaptureMode {
+        case idle
+        case live
+        case paused
+    }
+
+    @State private var captureMode: CaptureMode = .idle
+    @State private var showsInfo = false
+    @State private var pointCloudPhase: LiDARPointCloudPhase = .idle
+
+    private var isCapturing: Bool { captureMode == .live }
+
+    private var status: (title: String, symbol: String) {
+        if captureMode == .paused {
+            return ("Paused", "pause.fill")
+        }
+        return (pointCloudPhase.title, pointCloudPhase.symbolName)
+    }
+
     var body: some View {
-        LiDARPointCloudView(
-            displayMode: .live,
-            colorMode: .camera,
-            allowsOrbitInteraction: true
-        )
-            .ignoresSafeArea(edges: [.top, .horizontal])
+        NavigationStack {
+            ZStack {
+                LiDARPointCloudView(
+                    displayMode: captureMode == .idle ? .demo : .live,
+                    colorMode: .camera,
+                    minimumConfidence: .balanced,
+                    showsControls: captureMode != .idle,
+                    allowsOrbitInteraction: true,
+                    isActive: isCapturing,
+                    onPhaseChange: { pointCloudPhase = $0 }
+                )
+                .ignoresSafeArea(edges: [.top, .horizontal])
+
+                if captureMode == .idle {
+                    welcomeCard
+                } else if captureMode == .paused {
+                    pausedCard
+                }
+            }
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Text("Spatial Scan")
+                        .font(.headline)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("About camera colour", systemImage: "info.circle") {
+                        showsInfo = true
+                    }
+                    .labelStyle(.iconOnly)
+                }
+            }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                HStack {
+                    Spacer()
+                    HStack(spacing: 6) {
+                        Image(systemName: status.symbol)
+                        Text(status.title)
+                    }
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .demoGlassSurface(cornerRadius: 14)
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 4)
+            }
+            .safeAreaInset(edge: .bottom) {
+                scanDock
+            }
+            .sheet(isPresented: $showsInfo) {
+                cameraColourExplanation
+                    .presentationDetents([.medium])
+            }
+        }
+    }
+
+    private var welcomeCard: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "cube.transparent")
+                .font(.system(size: 34, weight: .medium))
+                .foregroundStyle(.cyan)
+            Text("Spatial Scan")
+                .font(.title2.weight(.semibold))
+            Text("LiDAR builds the geometry. The rear camera adds real-world colour. Frames stay on this device.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .padding(22)
+        .frame(maxWidth: 340)
+        .demoGlassSurface(cornerRadius: 28)
+        .padding(24)
+    }
+
+    private var pausedCard: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "pause.circle.fill")
+                .font(.system(size: 30))
+                .foregroundStyle(.cyan)
+            Text("LiDAR paused")
+                .font(.headline)
+            Text("Camera capture is paused until you resume.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+        .padding(18)
+        .demoGlassSurface(cornerRadius: 24)
+    }
+
+    @ViewBuilder
+    private var scanDock: some View {
+        HStack(spacing: 12) {
+            switch captureMode {
+            case .idle:
+                Button("Start", systemImage: "viewfinder") {
+                    captureMode = .live
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.cyan)
+            case .live:
+                Button("Pause", systemImage: "pause.fill") {
+                    captureMode = .paused
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.cyan)
+                Button("End", systemImage: "xmark") {
+                    captureMode = .idle
+                }
+                .buttonStyle(.bordered)
+            case .paused:
+                Button("Resume", systemImage: "play.fill") {
+                    captureMode = .live
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.cyan)
+                Button("End", systemImage: "xmark") {
+                    captureMode = .idle
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
+        .demoGlassSurface(cornerRadius: 24)
+        .padding(.horizontal, 20)
+        .padding(.bottom, 6)
+    }
+
+    private var cameraColourExplanation: some View {
+        NavigationStack {
+            List {
+                Label("LiDAR measures distance and creates the 3D points.", systemImage: "sensor.tag.radiowaves.forward")
+                Label("The rear camera supplies colour for those LiDAR points.", systemImage: "camera.fill")
+                Label("Depth and Confidence remain diagnostic views of the same LiDAR geometry.", systemImage: "ruler")
+            }
+            .navigationTitle("Camera + LiDAR")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func demoGlassSurface(cornerRadius: CGFloat) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        if #available(iOS 26.0, *) {
+            self.glassEffect(.regular, in: shape)
+        } else {
+            self.background(.ultraThinMaterial, in: shape)
+        }
     }
 }
 

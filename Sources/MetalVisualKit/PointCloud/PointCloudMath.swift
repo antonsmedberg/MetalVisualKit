@@ -22,6 +22,7 @@ extension PointCloudRenderer {
     }
 
     static let demoElevationLimit: Float = .pi / 3
+    static let demoZoomRange: ClosedRange<Float> = 0.65...1.8
 
     static func updatedDemoOrbit(
         _ orbit: DemoOrbit,
@@ -35,6 +36,11 @@ extension PointCloudRenderer {
                 demoElevationLimit
             )
         )
+    }
+
+    static func updatedDemoZoom(_ zoom: Float, pinchScale: Float) -> Float {
+        guard pinchScale.isFinite, pinchScale > 0 else { return zoom }
+        return (zoom / pinchScale).clamped(to: demoZoomRange)
     }
 
     /// Camera distance that fits a sphere against whichever projection cone is
@@ -108,8 +114,9 @@ extension PointCloudRenderer {
     /// interface orientation.
     ///
     /// The cases follow the orientation derivation from Apple's *Visualizing a
-    /// Point Cloud Using Scene Depth* sample. None has been confirmed on physical
-    /// LiDAR hardware yet. See `THIRD_PARTY_NOTICES.md` for attribution.
+    /// Point Cloud Using Scene Depth* sample. The project owner's first hardware
+    /// pass exposed the surrounding `localToWorld` defect; all orientations still
+    /// need a fresh device regression pass. See `THIRD_PARTY_NOTICES.md`.
     static func rotateToARCamera(for orientation: UIInterfaceOrientation) -> simd_float4x4 {
         let flipYZ = simd_float4x4(diagonal: SIMD4<Float>(1, -1, -1, 1))
         let angle: Float
@@ -121,5 +128,16 @@ extension PointCloudRenderer {
         }
         let rotation = simd_float4x4(simd_quatf(angle: angle, axis: SIMD3<Float>(0, 0, 1)))
         return flipYZ * rotation
+    }
+
+    /// Transforms depth-camera coordinates into world space for the oriented
+    /// camera view. ARKit's `viewMatrix(for:)` already contains the interface
+    /// orientation, so its inverse—not the raw camera transform—must anchor the
+    /// unprojected points.
+    static func localToWorld(
+        viewMatrix: simd_float4x4,
+        orientation: UIInterfaceOrientation
+    ) -> simd_float4x4 {
+        viewMatrix.inverse * rotateToARCamera(for: orientation)
     }
 }
