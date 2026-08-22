@@ -182,7 +182,7 @@ final class PipelineTests: XCTestCase {
     }
 
     func testCloudUniformsStride() {
-        // 2 × float4x4 (128) + float3x3 (48) + 2 × float2 (16) + 3 × float (12) = 208
+        // 2 × float4x4 (128) + float3x3 (48) + 2 × float2 (16) + 4 × float (16) = 208
         XCTAssertEqual(MemoryLayout<CloudUniforms>.stride, 208)
         XCTAssertEqual(MemoryLayout<CloudUniforms>.alignment, 16)
     }

@@ -207,7 +207,11 @@ private struct LoaderTab: View {
 
 private struct CloudTab: View {
     var body: some View {
-        LiDARPointCloudView(displayMode: .live, allowsOrbitInteraction: true)
+        LiDARPointCloudView(
+            displayMode: .live,
+            colorMode: .camera,
+            allowsOrbitInteraction: true
+        )
             .ignoresSafeArea(edges: [.top, .horizontal])
     }
 }

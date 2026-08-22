@@ -11,12 +11,15 @@ final class AccessibilityTests: XCTestCase {
 
     @MainActor
     func testRendererFailureLeavesInstalledOrbitDisabledAndActionsCleared() throws {
+        var reportedStatuses: [PointCloudSessionMonitor.Status] = []
         let bridge = PointCloudMetalView(
             source: .demo,
             maxDepth: 5,
+            colorMode: .camera,
             reduceMotion: false,
             isActive: true,
             allowsOrbitInteraction: true,
+            onSessionStatusChange: { reportedStatuses.append($0) },
             rendererFactory: { _, _ in throw ExpectedRendererFailure.rendererUnavailable }
         )
         let host = UIHostingController(rootView: bridge.frame(width: 240, height: 240))
@@ -35,6 +38,7 @@ final class AccessibilityTests: XCTestCase {
         let installedRecognizer: UIPanGestureRecognizer = try XCTUnwrap(panRecognizers.first)
         XCTAssertFalse(installedRecognizer.isEnabled)
         XCTAssertNil(metalView.accessibilityCustomActions)
+        XCTAssertEqual(reportedStatuses, [.failed("Metal renderer unavailable.")])
     }
 
     @MainActor
@@ -42,6 +46,7 @@ final class AccessibilityTests: XCTestCase {
         let bridge = PointCloudMetalView(
             source: .demo,
             maxDepth: 5,
+            colorMode: .camera,
             reduceMotion: false,
             isActive: true,
             allowsOrbitInteraction: true
