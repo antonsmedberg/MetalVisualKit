@@ -23,7 +23,7 @@ using namespace metal;
 /// stride 208, align 16 — see PipelineTests.testCloudUniformsStride
 struct CloudUniforms {
     float4x4 viewProjection;
-    float4x4 localToWorld;        // camera transform × rotate-to-ARKit-camera
+    float4x4 localToWorld;        // inverse oriented view × rotate-to-ARKit-camera
     float3x3 intrinsicsInv;       // inverse camera intrinsics
     float2   cameraResolution;    // captured image resolution (intrinsics space)
     float2   gridResolution;      // depth map size, e.g. 256×192

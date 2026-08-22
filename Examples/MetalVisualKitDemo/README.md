@@ -24,8 +24,8 @@ The app depends on the package by relative path (`../..`). Xcode therefore shows
 
 The loader tab exposes determinate and indeterminate variants plus explicit
 light- and dark-surface previews. The Spatial Scan tab starts with an orbitable,
-pinch-zoomable procedural cloud and requests camera permission only after **Start
-LiDAR**. Its toolbar and bottom dock expose Start, Pause, Resume and End states;
+pinch-zoomable procedural cloud and requests camera permission only after **Start**.
+Its toolbar and bottom dock expose Start, Pause, Resume and End states;
 live settings include colour, confidence floor and maximum depth. The package
 default still leaves fallback gestures disabled for safe embedding.
 
