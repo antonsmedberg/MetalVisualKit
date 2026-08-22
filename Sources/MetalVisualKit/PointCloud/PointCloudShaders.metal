@@ -87,7 +87,7 @@ static float hash11(float x) {
 
 // MARK: - Camera colour
 
-/// Full-range YCbCr to sRGB. ARKit captures full-range ITU-R BT.601 values, so
+/// Full-range YCbCr to RGB. ARKit captures full-range ITU-R BT.601 values, so
 /// the video-range scaling that most YUV code applies must not be used here.
 static float3 cameraColour(texture2d<float, access::sample> luma,
                            texture2d<float, access::sample> chroma,

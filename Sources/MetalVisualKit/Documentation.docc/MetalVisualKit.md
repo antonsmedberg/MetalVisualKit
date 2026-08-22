@@ -32,7 +32,7 @@ actions.
 ``PointCloudColorMode`` decides where each point's colour comes from. In the
 default `camera` mode the vertex shader also samples `ARFrame.capturedImage` from
 the same frame — bound as separate luma and chroma textures, since ARKit delivers
-bi-planar YCbCr rather than RGB — and converts to sRGB on the GPU. The `depth` and
+bi-planar YCbCr rather than RGB — and converts to RGB on the GPU. The `depth` and
 `confidence` modes keep diagnostic views available when validating the sensor.
 
 ### Accessibility

@@ -17,7 +17,7 @@ The sample carries this notice:
 ## Apple `capturedImage` conversion matrix
 
 `cameraColour()` in `Sources/MetalVisualKit/PointCloud/PointCloudShaders.metal`
-uses the full-range YCbCr-to-sRGB matrix published in Apple's documentation for
+uses the full-range YCbCr-to-RGB matrix published in Apple's documentation for
 [`ARFrame.capturedImage`](https://developer.apple.com/documentation/arkit/arframe/capturedimage).
 Apple documents it as the conversion required for ARKit's full-range ITU-R
 BT.601 capture, per ITU-T T.871. The coefficients are the standard ones for that

@@ -85,6 +85,7 @@ struct PointCloudMetalView: UIViewRepresentable {
     @MainActor
     final class Coordinator: NSObject {
         var renderer: PointCloudRenderer?
+        var failedSource: PointCloudSource?
         weak var view: MTKView?
         weak var orbitGestureRecognizer: UIPanGestureRecognizer?
         /// Reassigned on every SwiftUI update so the renderer always reports
@@ -231,6 +232,7 @@ struct PointCloudMetalView: UIViewRepresentable {
             renderer.setActive(isActive)
             view.delegate = renderer
             coordinator.renderer = renderer
+            coordinator.failedSource = nil
             configureDrawingMode(view, source: renderer.source, coordinator: coordinator)
         } catch {
             Self.configureOrbitGesture(
@@ -238,6 +240,8 @@ struct PointCloudMetalView: UIViewRepresentable {
                 source: source,
                 allowsOrbitInteraction: false
             )
+            coordinator.failedSource = source
+            coordinator.onSessionStatusChange(.failed("Metal renderer unavailable."))
             MetalVisualLog.renderer.error(
                 "PointCloudRenderer failed to initialise: \(String(describing: error), privacy: .public)"
             )
@@ -256,7 +260,9 @@ struct PointCloudMetalView: UIViewRepresentable {
         // — demo forever after permission is granted, or a live session running
         // after it is revoked.
         if context.coordinator.renderer?.source != source {
-            attachRenderer(to: uiView, coordinator: context.coordinator)
+            if context.coordinator.failedSource != source {
+                attachRenderer(to: uiView, coordinator: context.coordinator)
+            }
             return
         }
 

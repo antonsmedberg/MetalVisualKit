@@ -73,16 +73,6 @@ final class ARFrameTextures {
         self.cache = cache
     }
 
-    /// Drops cached texture mappings Core Video no longer needs.
-    ///
-    /// ARKit recycles a small pool of pixel buffers, and the cache keeps one
-    /// mapping per buffer it has seen. Without a periodic flush those mappings
-    /// accumulate for the lifetime of the session. Call this once per frame,
-    /// after the command buffer is committed.
-    func flush() {
-        CVMetalTextureCacheFlush(cache, 0)
-    }
-
     // MARK: Depth and confidence
 
     func depth(from depthData: ARDepthData) -> TextureBinding? {

@@ -34,8 +34,8 @@ claim yet.
   buffers while reading per-plane dimensions for the camera image.
 - Falls back to depth colouring when camera planes cannot be bound instead of
   dropping a valid depth frame.
-- Flushes stale Core Video texture-cache mappings after committed live frames and
-  retains every active wrapper until the GPU completes.
+- Retains every active Core Video texture wrapper until the GPU completes, so
+  ARKit cannot recycle an image buffer while Metal is still reading it.
 - Reads the current drawable and layout sizes inside the draw callback to avoid a
   one-frame stale projection during rotation.
 - Discards nearly transparent point fragments before they can write depth and

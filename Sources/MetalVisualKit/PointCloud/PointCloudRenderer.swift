@@ -250,8 +250,6 @@ final class PointCloudRenderer: NSObject, MTKViewDelegate {
         // or encoder creation had failed.
         if let liveFrame {
             lastRenderedFrameTimestamp = liveFrame.timestamp
-            // ARKit recycles its buffer pool; drop cache mappings no longer used.
-            textures?.flush()
         }
     }
 
