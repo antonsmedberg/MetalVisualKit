@@ -121,6 +121,16 @@ final class PointCloudColorTests: XCTestCase {
             ),
             .idle
         )
+
+        XCTAssertEqual(
+            LiDARPointCloudView.phase(
+                isActive: false,
+                fallbackReason: nil,
+                status: .preparing("Starting…")
+            ),
+            .idle
+        )
+
         XCTAssertEqual(
             LiDARPointCloudView.phase(
                 isActive: true,
@@ -129,6 +139,7 @@ final class PointCloudColorTests: XCTestCase {
             ),
             .fallback("No LiDAR scanner.")
         )
+
         XCTAssertEqual(
             LiDARPointCloudView.phase(
                 isActive: true,
@@ -137,6 +148,7 @@ final class PointCloudColorTests: XCTestCase {
             ),
             .preparing("Starting…")
         )
+
         XCTAssertEqual(
             LiDARPointCloudView.phase(
                 isActive: true,
@@ -144,23 +156,6 @@ final class PointCloudColorTests: XCTestCase {
                 status: .tracking
             ),
             .tracking
-        )
-    }
-
-    func testPausedCaptureSuppressesStaleSessionOverlay() {
-        XCTAssertFalse(
-            LiDARPointCloudView.shouldShowSessionOverlay(
-                captureIsActive: false,
-                isLive: true,
-                message: "Starting the camera…"
-            )
-        )
-        XCTAssertTrue(
-            LiDARPointCloudView.shouldShowSessionOverlay(
-                captureIsActive: true,
-                isLive: true,
-                message: "Starting the camera…"
-            )
         )
     }
 

@@ -24,6 +24,19 @@ there is no release to claim yet.
   existing opt-in orbit interaction.
 - Added `ROADMAP.md` covering RoomPlan capture/export, ARKit scene reconstruction,
   model licensing and physical-device release gates.
+- Replaced the empty white launch with a dark asset-catalog launch surface and a
+  lightweight animated spatial-particle preparation view.
+- Added `SURFEL-MVP.md`, an evidence-based integration plan for the proposed
+  anisotropic surfel renderer without claiming its current scaffold is shipped.
+
+### Changed — Spatial Scan layout
+
+- Keeps the procedural idle cloud animated without starting camera capture and
+  starts it farther back so the onboarding card no longer dominates the globe.
+- Moves limited-tracking guidance below the safe area and to the trailing edge,
+  avoiding the Dynamic Island.
+- Compacts live colour, quality and range controls and uses circular Pause/End
+  actions with explicit accessibility labels.
 
 ### Changed — live depth performance
 

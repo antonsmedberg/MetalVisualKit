@@ -271,6 +271,12 @@ post-scan viewer. Monocular depth models are not bundled: LiDAR already provides
 metric depth, and another model would add thermal cost, alignment work and a
 separate model-license obligation without making the result survey- or BIM-grade.
 
+The proposed anisotropic surfel archive is audited separately in
+[SURFEL-MVP.md](SURFEL-MVP.md). Its maths and rendering ideas are useful, but its
+current files are unwired scaffolding and do not compile as a complete package;
+the verified point renderer remains the fallback until an isolated surfel path
+passes device and performance gates.
+
 ## Development
 
 ```

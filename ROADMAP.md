@@ -49,6 +49,10 @@ Planned work:
 
 RoomPlan and scene reconstruction can coexist: RoomPlan supplies parametric structure while ARKit mesh anchors supply denser display geometry.
 
+An anisotropic surfel renderer is a separate live-visualization phase rather than
+a substitute for RoomPlan or mesh reconstruction. Its reviewed integration and
+measurement gates are defined in [SURFEL-MVP.md](SURFEL-MVP.md).
+
 ## ML policy
 
 No external model is bundled today.

@@ -76,7 +76,7 @@ final class PointCloudMathTests: XCTestCase {
     func testDemoCameraDistanceFitsTheNarrowerFieldOfView() {
         let fovY: Float = .pi / 3.2
         let radius: Float = 1.15
-        let margin: Float = 1.18
+        let margin: Float = 1.30
         let portraitDistance = PointCloudRenderer.demoCameraDistance(
             aspect: 0.46,
             fovY: fovY,
@@ -153,5 +153,9 @@ final class PointCloudMathTests: XCTestCase {
         XCTAssertEqual(PointCloudRenderer.updatedDemoZoom(1, pinchScale: 2), 0.65)
         XCTAssertEqual(PointCloudRenderer.updatedDemoZoom(1, pinchScale: 0.5), 1.8)
         XCTAssertEqual(PointCloudRenderer.updatedDemoZoom(1, pinchScale: 1.25), 0.8)
+    }
+
+    func testIdleCloudStartsAtAComfortableViewingDistance() {
+        XCTAssertEqual(PointCloudRenderer.defaultDemoZoom, 1.4)
     }
 }

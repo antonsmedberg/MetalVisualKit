@@ -31,7 +31,13 @@ default still leaves fallback gestures disabled for safe embedding.
 
 The demo accepts deterministic launch arguments for screenshot and regression
 work: `--demo-progress=0.68`, `--demo-spinner`, `--demo-light`, and
-`--demo-cloud`. These affect only the example app, not the package API.
+`--demo-cloud`. Add `--skip-launch` when capturing a deterministic component frame
+instead of the branded preparation experience. These affect only the example app,
+not the package API.
+
+The static launch screen uses the same dark surface as the animated in-app
+preparation view, so a cold Metal pipeline compile never presents an unrelated
+white frame.
 
 ## SwiftUI previews
 
