@@ -8,8 +8,49 @@ All notable changes to this project are documented here. The format follows
 
 Nothing is tagged yet. Xcode 26.6 builds the package, current test suite, example
 app and DocC archive; both package components also render in an iOS 26.5 simulator.
-Live capture has not run on physical LiDAR hardware, so there is no release to
-claim yet.
+The project owner has exercised live LiDAR on compatible hardware; the current
+orientation and performance changes still need a fresh device regression pass, so
+there is no release to claim yet.
+
+### Added — Spatial Scan experience
+
+- Added All, Balanced and Precise confidence floors and wired the selected floor
+  through SwiftUI, the Metal bridge and GPU uniforms.
+- Added explicit Start, Pause, Resume and End states to the demo's new Spatial
+  Scan toolbar and bottom dock.
+- Added particle-based LiDAR preparation feedback while preserving actionable
+  tracking guidance for motion and low-texture conditions.
+- Added bounded pinch zoom and VoiceOver zoom actions to the procedural cloud's
+  existing opt-in orbit interaction.
+- Added `ROADMAP.md` covering RoomPlan capture/export, ARKit scene reconstruction,
+  model licensing and physical-device release gates.
+- Replaced the empty white launch with a dark asset-catalog launch surface and a
+  lightweight animated spatial-particle preparation view.
+- Added `SURFEL-MVP.md`, an evidence-based integration plan for the proposed
+  anisotropic surfel renderer without claiming its current scaffold is shipped.
+
+### Changed — Spatial Scan layout
+
+- Keeps the procedural idle cloud animated without starting camera capture and
+  starts it farther back so the onboarding card no longer dominates the globe.
+- Moves limited-tracking guidance below the safe area and to the trailing edge,
+  avoiding the Dynamic Island.
+- Compacts live colour, quality and range controls and uses circular Pause/End
+  actions with explicit accessibility labels.
+
+### Changed — live depth performance
+
+- Requests raw and smoothed scene depth together when supported, allowing the
+  renderer to prefer stable frames without losing the instantaneous startup path.
+- Reduced the live point size from 8 to 3 layout points. On a 3× display that
+  reduces the nominal sprite footprint from 24 to 9 pixels while preserving the
+  depth grid density; normal validity, range and confidence culling still apply.
+
+### Fixed — live orientation
+
+- Builds `localToWorld` from the inverse orientation-aware ARKit view matrix,
+  matching Apple's point-cloud reference path instead of combining an oriented
+  projection with the raw camera transform.
 
 ### Added — camera colour
 

@@ -25,15 +25,22 @@ dark palettes for custom host surfaces.
 unprojects through the inverse camera intrinsics and transforms to world space
 with the camera pose. Swift validates the AR frame, prepares camera matrices and
 binds the textures. It does not read back or individually unproject depth pixels
-on the CPU. Procedural orbit is disabled by default so fallback does not take
-gestures from a host view; callers can opt in to pan and named VoiceOver rotation
-actions.
+on the CPU. The depth-to-world transform uses the inverse orientation-aware ARKit
+view matrix, and compatible devices provide raw plus smoothed depth semantics.
+Procedural interaction is disabled by default so fallback does not take gestures
+from a host view; callers can opt in to pan, pinch zoom and named VoiceOver
+rotation and zoom actions.
 
 ``PointCloudColorMode`` decides where each point's colour comes from. In the
 default `camera` mode the vertex shader also samples `ARFrame.capturedImage` from
 the same frame — bound as separate luma and chroma textures, since ARKit delivers
 bi-planar YCbCr rather than RGB — and converts to RGB on the GPU. The `depth` and
 `confidence` modes keep diagnostic views available when validating the sensor.
+``PointCloudConfidenceFloor`` independently chooses whether geometry includes all
+samples, medium-and-high samples, or high-confidence samples only.
+``LiDARPointCloudPhase`` reports the resolved idle, preparing, tracking, limited,
+fallback, interrupted or failed state so host UI does not confuse a capture
+request with a live sensor session.
 
 ### Accessibility
 
@@ -42,7 +49,8 @@ without touch repulsion or a completion release, and the demo cloud stops
 rotating. Settled particle and demo views draw on demand, while progress and
 camera-driven geometry still update. Both views expose an accessibility label;
 the loader also publishes its percentage as an accessibility value. An orbitable
-demo cloud provides named VoiceOver actions for four rotation directions.
+demo cloud provides named VoiceOver actions for four rotation directions and
+bounded zoom in/out.
 
 ### A note on struct layouts
 
@@ -64,3 +72,5 @@ directly, and `PipelineTests` pins the resulting strides.
 
 - ``LiDARPointCloudView``
 - ``PointCloudColorMode``
+- ``PointCloudConfidenceFloor``
+- ``LiDARPointCloudPhase``

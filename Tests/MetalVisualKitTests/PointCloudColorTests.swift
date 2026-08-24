@@ -86,10 +86,77 @@ final class PointCloudColorTests: XCTestCase {
         XCTAssertEqual(symbols.count, PointCloudColorMode.allCases.count)
     }
 
+    func testConfidenceFloorsMapToRawARKitLevels() {
+        XCTAssertEqual(PointCloudConfidenceFloor.all.rawValue, 0)
+        XCTAssertEqual(PointCloudConfidenceFloor.balanced.rawValue, 1)
+        XCTAssertEqual(PointCloudConfidenceFloor.precise.rawValue, 2)
+        XCTAssertEqual(CloudUniforms().minConfidence, PointCloudConfidenceFloor.balanced.rawValue)
+    }
+
     // MARK: - Session status
 
     func testNormalTrackingShowsNothing() {
         XCTAssertNil(PointCloudSessionMonitor.status(for: .normal).message)
+    }
+
+    func testPreparingStatesAreDistinctFromActionableTrackingLimits() {
+        XCTAssertTrue(PointCloudSessionMonitor.Status.starting.isPreparing)
+        XCTAssertTrue(
+            PointCloudSessionMonitor.status(for: .limited(.initializing)).isPreparing
+        )
+        XCTAssertTrue(
+            PointCloudSessionMonitor.status(for: .limited(.relocalizing)).isPreparing
+        )
+        XCTAssertFalse(
+            PointCloudSessionMonitor.status(for: .limited(.excessiveMotion)).isPreparing
+        )
+    }
+
+    func testPublicPhaseDistinguishesIntentFromResolvedCaptureState() {
+        XCTAssertEqual(
+            LiDARPointCloudView.phase(
+                isActive: false,
+                fallbackReason: nil,
+                status: .tracking
+            ),
+            .idle
+        )
+
+        XCTAssertEqual(
+            LiDARPointCloudView.phase(
+                isActive: false,
+                fallbackReason: nil,
+                status: .preparing("Starting…")
+            ),
+            .idle
+        )
+
+        XCTAssertEqual(
+            LiDARPointCloudView.phase(
+                isActive: true,
+                fallbackReason: "No LiDAR scanner.",
+                status: .tracking
+            ),
+            .fallback("No LiDAR scanner.")
+        )
+
+        XCTAssertEqual(
+            LiDARPointCloudView.phase(
+                isActive: true,
+                fallbackReason: nil,
+                status: .preparing("Starting…")
+            ),
+            .preparing("Starting…")
+        )
+
+        XCTAssertEqual(
+            LiDARPointCloudView.phase(
+                isActive: true,
+                fallbackReason: nil,
+                status: .tracking
+            ),
+            .tracking
+        )
     }
 
     func testEveryLimitedReasonProducesGuidance() {
@@ -127,5 +194,15 @@ final class PointCloudColorTests: XCTestCase {
 
     func testInterruptedStatusExplainsItself() {
         XCTAssertNotNil(PointCloudSessionMonitor.Status.interrupted.message)
+    }
+
+    func testSessionStartRepublishesPreparingState() {
+        let monitor = PointCloudSessionMonitor()
+        var reported: [PointCloudSessionMonitor.Status] = []
+        monitor.onChange = { reported.append($0) }
+
+        monitor.prepareForStart()
+
+        XCTAssertEqual(reported, [.starting])
     }
 }

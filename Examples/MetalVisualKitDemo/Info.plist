@@ -23,7 +23,10 @@
 	<key>NSCameraUsageDescription</key>
 	<string>Used to visualize depth data from the LiDAR scanner.</string>
 	<key>UILaunchScreen</key>
-	<dict/>
+	<dict>
+		<key>UIColorName</key>
+		<string>LaunchBackground</string>
+	</dict>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>

@@ -22,10 +22,10 @@ struct CloudUniforms {
     var intrinsicsInv: simd_float3x3 = matrix_identity_float3x3
     var cameraResolution: SIMD2<Float> = .zero
     var gridResolution: SIMD2<Float> = .zero
-    var pointSize: Float = 8
+    var pointSize: Float = 3
     var maxDepth: Float = 5
-    /// Raw `ARConfidenceLevel`. 1 keeps medium and high, discarding low.
-    var minConfidence: Float = 1
+    /// Raw `ARConfidenceLevel`. The default keeps medium and high.
+    var minConfidence: Float = PointCloudConfidenceFloor.balanced.rawValue
     /// `PointCloudColorMode.shaderValue`. Carried as a float so the struct keeps
     /// one scalar type and the parity script keeps one layout table.
     var colorMode: Float = PointCloudColorMode.camera.shaderValue
@@ -39,6 +39,73 @@ struct DemoUniforms {
     var pointCount: Float = 24_000
     var pointSize: Float = 60
     var motionScale: Float = 1
+}
+
+// MARK: - Confidence floor
+
+/// Minimum ARKit confidence level the renderer accepts as geometry.
+public enum PointCloudConfidenceFloor: Float, CaseIterable, Identifiable, Sendable {
+    /// Include low, medium and high confidence samples.
+    case all = 0
+    /// Include medium and high confidence samples.
+    case balanced = 1
+    /// Include only high confidence samples.
+    case precise = 2
+
+    public var id: Self { self }
+
+    public var title: String {
+        switch self {
+        case .all: return "All"
+        case .balanced: return "Balanced"
+        case .precise: return "Precise"
+        }
+    }
+
+    public var symbolName: String {
+        switch self {
+        case .all: return "circle.grid.3x3"
+        case .balanced: return "circle.grid.2x2"
+        case .precise: return "scope"
+        }
+    }
+}
+
+// MARK: - Capture phase
+
+/// Resolved state of a ``LiDARPointCloudView`` capture request.
+public enum LiDARPointCloudPhase: Equatable, Sendable {
+    case idle
+    case preparing(String)
+    case tracking
+    case limited(String)
+    case interrupted
+    case fallback(String)
+    case failed(String)
+
+    public var title: String {
+        switch self {
+        case .idle: return "Ready"
+        case .preparing: return "Preparing"
+        case .tracking: return "Live"
+        case .limited: return "Limited"
+        case .interrupted: return "Interrupted"
+        case .fallback: return "Demo"
+        case .failed: return "Failed"
+        }
+    }
+
+    public var symbolName: String {
+        switch self {
+        case .idle: return "circle.dashed"
+        case .preparing: return "viewfinder"
+        case .tracking: return "sensor.tag.radiowaves.forward"
+        case .limited: return "exclamationmark.triangle"
+        case .interrupted: return "pause.fill"
+        case .fallback: return "cube.transparent"
+        case .failed: return "xmark.octagon"
+        }
+    }
 }
 
 // MARK: - Source

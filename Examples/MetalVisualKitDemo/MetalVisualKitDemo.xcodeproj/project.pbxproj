@@ -7,8 +7,15 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		23099309AC106216E8AEFCB3 /* SpatialScanTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = C957832B86ABB573829F667A /* SpatialScanTypes.swift */; };
 		33957762E5F8CE6A04812659 /* MetalVisualKitDemoApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B97329BBC9795004D438354 /* MetalVisualKitDemoApp.swift */; };
+		3A9BD62BF7AE855E37959665 /* DemoGlass.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1D4644C367F9272BC9C702E /* DemoGlass.swift */; };
+		82307AB4B1DF637736B0B89A /* LoaderTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = E062B7713B8DD19A292B3BB4 /* LoaderTab.swift */; };
+		A2E2447DC83B764431095DDB /* SpatialScanTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = B687001796C8867FBE159480 /* SpatialScanTab.swift */; };
+		B12AE997325CDD02B24E5340 /* SpatialScanControlDeck.swift in Sources */ = {isa = PBXBuildFile; fileRef = 278FA936495A5DCE85A59F6B /* SpatialScanControlDeck.swift */; };
 		D89B173FEB1F69D75C5AFD27 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 5C8149411097E05B246C0FCD /* Assets.xcassets */; };
+		E1180FE5C7EEC14F4C300BB0 /* SpatialScanInfoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58F08212EE021FE0B69EBCA9 /* SpatialScanInfoView.swift */; };
+		E6849340A4E72403D75D60C6 /* SpatialScanComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F3AC62C39265D4097DF885B /* SpatialScanComponents.swift */; };
 		FA1903AC0241275083FC6CDE /* MetalVisualShowcase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90F529EEC688FD7F34A2F5AA /* MetalVisualShowcase.swift */; };
 		FF974AF7A956AC3D1CD6CA91 /* MetalVisualKit in Frameworks */ = {isa = PBXBuildFile; productRef = 3C7E2649C51729D2AE43C2BD /* MetalVisualKit */; };
 /* End PBXBuildFile section */
@@ -16,9 +23,16 @@
 /* Begin PBXFileReference section */
 		05AFFC43C3D3EECFD8CA7E63 /* MetalVisualKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = MetalVisualKit; path = ../..; sourceTree = SOURCE_ROOT; };
 		0B97329BBC9795004D438354 /* MetalVisualKitDemoApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetalVisualKitDemoApp.swift; sourceTree = "<group>"; };
+		278FA936495A5DCE85A59F6B /* SpatialScanControlDeck.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpatialScanControlDeck.swift; sourceTree = "<group>"; };
 		3E78E3B054255017CC39CA74 /* MetalVisualKitDemo.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = MetalVisualKitDemo.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		58F08212EE021FE0B69EBCA9 /* SpatialScanInfoView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpatialScanInfoView.swift; sourceTree = "<group>"; };
 		5C8149411097E05B246C0FCD /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		90F529EEC688FD7F34A2F5AA /* MetalVisualShowcase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetalVisualShowcase.swift; sourceTree = "<group>"; };
+		9F3AC62C39265D4097DF885B /* SpatialScanComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpatialScanComponents.swift; sourceTree = "<group>"; };
+		A1D4644C367F9272BC9C702E /* DemoGlass.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoGlass.swift; sourceTree = "<group>"; };
+		B687001796C8867FBE159480 /* SpatialScanTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpatialScanTab.swift; sourceTree = "<group>"; };
+		C957832B86ABB573829F667A /* SpatialScanTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpatialScanTypes.swift; sourceTree = "<group>"; };
+		E062B7713B8DD19A292B3BB4 /* LoaderTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoaderTab.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -33,11 +47,22 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		1D4B2CE3CD41BC691F964D25 /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				A1D4644C367F9272BC9C702E /* DemoGlass.swift */,
+			);
+			path = Shared;
+			sourceTree = "<group>";
+		};
 		26A3F60C0D11797FC26673F6 /* Sources */ = {
 			isa = PBXGroup;
 			children = (
 				0B97329BBC9795004D438354 /* MetalVisualKitDemoApp.swift */,
 				90F529EEC688FD7F34A2F5AA /* MetalVisualShowcase.swift */,
+				B1FCD4CEA633BDBCFD987836 /* Loader */,
+				1D4B2CE3CD41BC691F964D25 /* Shared */,
+				9F5FC0AA57213FCF2E955D9D /* SpatialScan */,
 			);
 			path = Sources;
 			sourceTree = "<group>";
@@ -66,6 +91,26 @@
 				5C8149411097E05B246C0FCD /* Assets.xcassets */,
 			);
 			path = Resources;
+			sourceTree = "<group>";
+		};
+		9F5FC0AA57213FCF2E955D9D /* SpatialScan */ = {
+			isa = PBXGroup;
+			children = (
+				9F3AC62C39265D4097DF885B /* SpatialScanComponents.swift */,
+				278FA936495A5DCE85A59F6B /* SpatialScanControlDeck.swift */,
+				58F08212EE021FE0B69EBCA9 /* SpatialScanInfoView.swift */,
+				B687001796C8867FBE159480 /* SpatialScanTab.swift */,
+				C957832B86ABB573829F667A /* SpatialScanTypes.swift */,
+			);
+			path = SpatialScan;
+			sourceTree = "<group>";
+		};
+		B1FCD4CEA633BDBCFD987836 /* Loader */ = {
+			isa = PBXGroup;
+			children = (
+				E062B7713B8DD19A292B3BB4 /* LoaderTab.swift */,
+			);
+			path = Loader;
 			sourceTree = "<group>";
 		};
 		D95DDAFC69ACA829E0717DC6 /* Products */ = {
@@ -148,8 +193,15 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				3A9BD62BF7AE855E37959665 /* DemoGlass.swift in Sources */,
+				82307AB4B1DF637736B0B89A /* LoaderTab.swift in Sources */,
 				33957762E5F8CE6A04812659 /* MetalVisualKitDemoApp.swift in Sources */,
 				FA1903AC0241275083FC6CDE /* MetalVisualShowcase.swift in Sources */,
+				E6849340A4E72403D75D60C6 /* SpatialScanComponents.swift in Sources */,
+				B12AE997325CDD02B24E5340 /* SpatialScanControlDeck.swift in Sources */,
+				E1180FE5C7EEC14F4C300BB0 /* SpatialScanInfoView.swift in Sources */,
+				A2E2447DC83B764431095DDB /* SpatialScanTab.swift in Sources */,
+				23099309AC106216E8AEFCB3 /* SpatialScanTypes.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
