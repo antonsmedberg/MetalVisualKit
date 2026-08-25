@@ -111,10 +111,8 @@ public enum LiDARPointCloudPhase: Equatable, Sendable {
 // MARK: - Source
 
 /// Which source the point cloud renders from.
-enum PointCloudSource {
-    /// ARKit `sceneDepth`. Requires a device with a LiDAR scanner.
+enum PointCloudSource: Equatable, Sendable {
     case live
-    /// Procedural cloud. Works everywhere, including previews and the simulator.
     case demo
 }
 
