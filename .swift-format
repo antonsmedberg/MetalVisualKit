@@ -4,10 +4,11 @@
   "indentation": {
     "spaces": 4
   },
+  "tabWidth": 4,
   "maximumBlankLines": 1,
-  "respectsExistingLineBreaks": true,
-  "lineBreakBeforeControlFlowKeywords": false,
+  "respectsExistingLineBreaks": false,
   "indentSwitchCaseLabels": false,
+  "lineBreakBeforeControlFlowKeywords": false,
   "multiElementCollectionTrailingCommas": false,
   "spacesAroundRangeFormationOperators": false,
   "indentBlankLines": false
