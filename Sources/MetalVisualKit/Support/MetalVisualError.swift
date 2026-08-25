@@ -19,18 +19,13 @@ enum MetalVisualError: Swift.Error, CustomStringConvertible {
 
     var description: String {
         switch self {
-        case .invalidParticleCount(let count):
-            return "Particle count must be positive (received \(count))."
+        case .invalidParticleCount(let count): return "Particle count must be positive (received \(count))."
         case .particleCountTooLarge(let count):
             return "Particle count is too large to allocate safely (received \(count))."
-        case .particleBufferUnavailable:
-            return "The Metal device could not allocate the particle buffer."
-        case .noMetalDevice:
-            return "No Metal device is available on this host."
-        case .commandQueueUnavailable:
-            return "The Metal device refused to create a command queue."
-        case .depthStateUnavailable:
-            return "The Metal device refused to create a depth stencil state."
+        case .particleBufferUnavailable: return "The Metal device could not allocate the particle buffer."
+        case .noMetalDevice: return "No Metal device is available on this host."
+        case .commandQueueUnavailable: return "The Metal device refused to create a command queue."
+        case .depthStateUnavailable: return "The Metal device refused to create a depth stencil state."
         case .textureCacheUnavailable(let status):
             return "Core Video refused to create a Metal texture cache (CVReturn \(status))."
         }

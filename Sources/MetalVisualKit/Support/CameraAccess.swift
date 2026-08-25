@@ -25,14 +25,9 @@ enum CameraAccess {
 
     /// True when the consuming app declares a camera usage string. Without it,
     /// requesting access is fatal rather than merely unsuccessful.
-    static var hasUsageDescription: Bool {
-        Bundle.main.object(forInfoDictionaryKey: "NSCameraUsageDescription") != nil
-    }
+    static var hasUsageDescription: Bool { Bundle.main.object(forInfoDictionaryKey: "NSCameraUsageDescription") != nil }
 
-    static func state(
-        hasUsageDescription: Bool,
-        authorizationStatus: AVAuthorizationStatus
-    ) -> State {
+    static func state(hasUsageDescription: Bool, authorizationStatus: AVAuthorizationStatus) -> State {
         guard hasUsageDescription else { return .usageDescriptionMissing }
         switch authorizationStatus {
         case .authorized: return .granted
@@ -47,8 +42,7 @@ enum CameraAccess {
     static var current: State {
         state(
             hasUsageDescription: hasUsageDescription,
-            authorizationStatus: AVCaptureDevice.authorizationStatus(for: .video)
-        )
+            authorizationStatus: AVCaptureDevice.authorizationStatus(for: .video))
     }
 
     /// Prompts once if the user has not been asked yet. Safe to call

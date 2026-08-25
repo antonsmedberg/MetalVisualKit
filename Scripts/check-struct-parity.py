@@ -1,17 +1,24 @@
 #!/usr/bin/env python3
 """
-Cross-check the hand-mirrored uniform structs between Swift and MSL.
+Cross-check the hand-mirrored GPU structs between Swift and Metal Shading
+Language.
 
-The Swift and Metal sides of this package describe the same memory twice, in two
-languages, with no compiler linking them. Drift produces a visual glitch rather
-than a build error, so it is checked here and pinned again in PipelineTests.
+The Swift and Metal sides describe the same memory layout independently.
+A mismatch can compile successfully while corrupting GPU data at runtime, so
+this script validates:
 
-This script compares field order, field types and the resulting stride, and
-verifies the strides asserted in PipelineTests still match what the layouts
-actually produce.
+1. Struct presence.
+2. Field order.
+3. Field types.
+4. Computed MSL-compatible stride and alignment.
+5. Matching MemoryLayout assertions somewhere in the Swift test suite.
 
-Usage:  python3 Scripts/check-struct-parity.py
-Exit:   0 if everything agrees, 1 otherwise.
+Usage:
+    python3 Scripts/check-struct-parity.py
+
+Exit status:
+    0 if all mirrored layouts agree.
+    1 if any mismatch is detected.
 """
 
 from __future__ import annotations
@@ -20,21 +27,32 @@ import pathlib
 import re
 import sys
 
-ROOT = pathlib.Path(__file__).resolve().parent.parent
-SOURCES = ROOT / "Sources" / "MetalVisualKit"
-TESTS = ROOT / "Tests" / "MetalVisualKitTests" / "PipelineTests.swift"
 
-# (size, alignment) per MSL's layout rules. Swift's SIMD types match these,
-# which is the property that makes a straight field-order mirror correct.
-LAYOUT = {
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+
+SOURCES = ROOT / "Sources" / "MetalVisualKit"
+TESTS = ROOT / "Tests" / "MetalVisualKitTests"
+
+
+# ---------------------------------------------------------------------------
+# GPU layout model
+# ---------------------------------------------------------------------------
+
+# (size, alignment) according to the Metal Shading Language layout rules.
+#
+# Swift SIMD storage matches these layouts for the types mirrored by this
+# package. float3 deliberately occupies 16 bytes rather than 12 in an aligned
+# struct, and float3x3 consists of three 16-byte-aligned columns.
+LAYOUT: dict[str, tuple[int, int]] = {
     "float": (4, 4),
     "float2": (8, 8),
     "float3": (16, 16),
-    "float3x3": (48, 16),   # three 16-byte-aligned columns, not 36 bytes
+    "float3x3": (48, 16),
     "float4x4": (64, 16),
 }
 
-SWIFT_TO_MSL = {
+
+SWIFT_TO_MSL: dict[str, str] = {
     "Float": "float",
     "SIMD2<Float>": "float2",
     "SIMD3<Float>": "float3",
@@ -42,8 +60,9 @@ SWIFT_TO_MSL = {
     "simd_float4x4": "float4x4",
 }
 
+
 # Swift struct name -> MSL struct name
-PAIRS = {
+PAIRS: dict[str, str] = {
     "LoaderUniforms": "LoaderUniforms",
     "LoaderParticle": "Particle",
     "CloudUniforms": "CloudUniforms",
@@ -51,107 +70,359 @@ PAIRS = {
 }
 
 
-def read(pattern: str) -> str:
-    return "\n".join(path.read_text() for path in sorted(SOURCES.rglob(pattern)))
+# ---------------------------------------------------------------------------
+# Source loading
+# ---------------------------------------------------------------------------
 
 
-def swift_structs(text: str) -> dict[str, list[tuple[str, str]]]:
-    found = {}
-    for match in re.finditer(r"struct (\w+) \{(.*?)\n\}", text, re.S):
-        fields = re.findall(r"var (\w+): ([\w<>]+)", match.group(2))
+def read_all(root: pathlib.Path, pattern: str) -> str:
+    """Read and concatenate every matching source file below root."""
+    paths = sorted(root.rglob(pattern))
+
+    return "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in paths
+    )
+
+
+# ---------------------------------------------------------------------------
+# Swift / Metal parsing
+# ---------------------------------------------------------------------------
+
+
+def swift_structs(
+    text: str,
+) -> dict[str, list[tuple[str, str]]]:
+    found: dict[str, list[tuple[str, str]]] = {}
+
+    for match in re.finditer(
+        r"struct\s+(\w+)\s*\{(.*?)\n\}",
+        text,
+        re.S,
+    ):
+        fields = re.findall(
+            r"\bvar\s+(\w+)\s*:\s*([\w<>]+)",
+            match.group(2),
+        )
+
         if fields:
             found[match.group(1)] = fields
+
     return found
 
 
-def msl_structs(text: str) -> dict[str, list[tuple[str, str]]]:
-    found = {}
-    for match in re.finditer(r"struct (\w+) \{(.*?)\n\};", text, re.S):
-        body = re.sub(r"//.*", "", match.group(2))
-        found[match.group(1)] = [
-            (name, type_) for type_, name in re.findall(r"(\w+)\s+(\w+);", body)
+def msl_structs(
+    text: str,
+) -> dict[str, list[tuple[str, str]]]:
+    found: dict[str, list[tuple[str, str]]] = {}
+
+    for match in re.finditer(
+        r"struct\s+(\w+)\s*\{(.*?)\n\};",
+        text,
+        re.S,
+    ):
+        body = re.sub(
+            r"//.*",
+            "",
+            match.group(2),
+        )
+
+        fields = [
+            (name, type_)
+            for type_, name in re.findall(
+                r"(\w+)\s+(\w+)\s*;",
+                body,
+            )
         ]
+
+        found[match.group(1)] = fields
+
     return found
 
 
-def stride(fields: list[tuple[str, str]]) -> tuple[int, int]:
-    """Offsets follow the C/MSL rule: pad each field up to its own alignment,
-    then round the total up to the struct's alignment."""
-    offset, alignment = 0, 1
+# ---------------------------------------------------------------------------
+# Layout calculation
+# ---------------------------------------------------------------------------
+
+
+def align_up(
+    value: int,
+    alignment: int,
+) -> int:
+    return -(-value // alignment) * alignment
+
+
+def stride(
+    fields: list[tuple[str, str]],
+) -> tuple[int, int]:
+    """
+    Compute C/MSL-style struct stride and alignment.
+
+    Every field starts at an offset satisfying its own alignment requirement,
+    and the final struct size is rounded to the maximum member alignment.
+    """
+
+    offset = 0
+    struct_alignment = 1
+
     for _, raw_type in fields:
-        type_ = SWIFT_TO_MSL.get(raw_type, raw_type)
-        size, align = LAYOUT[type_]
-        offset = -(-offset // align) * align
+        type_name = SWIFT_TO_MSL.get(
+            raw_type,
+            raw_type,
+        )
+
+        if type_name not in LAYOUT:
+            raise KeyError(
+                f"Unsupported mirrored GPU type: {raw_type}"
+            )
+
+        size, field_alignment = LAYOUT[type_name]
+
+        offset = align_up(
+            offset,
+            field_alignment,
+        )
+
         offset += size
-        alignment = max(alignment, align)
-    return -(-offset // alignment) * alignment, alignment
+
+        struct_alignment = max(
+            struct_alignment,
+            field_alignment,
+        )
+
+    return (
+        align_up(
+            offset,
+            struct_alignment,
+        ),
+        struct_alignment,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test assertion validation
+# ---------------------------------------------------------------------------
+
+
+def asserted_layout(
+    tests: str,
+    struct_name: str,
+) -> tuple[int, int] | None:
+    """
+    Find MemoryLayout stride/alignment assertions anywhere in the test suite.
+
+    Whitespace is deliberately flexible so assertions remain discoverable
+    after swift-format wraps them across multiple lines.
+    """
+
+    stride_match = re.search(
+        rf"""
+        MemoryLayout
+        \s*<\s*{re.escape(struct_name)}\s*>
+        \s*\.stride
+        \s*,\s*
+        (\d+)
+        """,
+        tests,
+        re.X | re.S,
+    )
+
+    alignment_match = re.search(
+        rf"""
+        MemoryLayout
+        \s*<\s*{re.escape(struct_name)}\s*>
+        \s*\.alignment
+        \s*,\s*
+        (\d+)
+        """,
+        tests,
+        re.X | re.S,
+    )
+
+    if not stride_match or not alignment_match:
+        return None
+
+    return (
+        int(stride_match.group(1)),
+        int(alignment_match.group(1)),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Validation
+# ---------------------------------------------------------------------------
+
+
+def validate_pair(
+    swift_name: str,
+    msl_name: str,
+    swift: dict[str, list[tuple[str, str]]],
+    metal: dict[str, list[tuple[str, str]]],
+    tests: str,
+) -> list[str]:
+    failures: list[str] = []
+
+    if swift_name not in swift:
+        return [
+            f"Swift struct '{swift_name}' not found."
+        ]
+
+    if msl_name not in metal:
+        return [
+            f"MSL struct '{msl_name}' not found."
+        ]
+
+    swift_fields = swift[swift_name]
+    msl_fields = metal[msl_name]
+
+    swift_names = [
+        name
+        for name, _ in swift_fields
+    ]
+
+    msl_names = [
+        name
+        for name, _ in msl_fields
+    ]
+
+    if swift_names != msl_names:
+        return [
+            (
+                f"{swift_name}: field names differ.\n"
+                f"  swift: {swift_names}\n"
+                f"  msl:   {msl_names}"
+            )
+        ]
+
+    swift_types = [
+        SWIFT_TO_MSL.get(
+            type_name,
+            type_name,
+        )
+        for _, type_name in swift_fields
+    ]
+
+    msl_types = [
+        type_name
+        for _, type_name in msl_fields
+    ]
+
+    if swift_types != msl_types:
+        return [
+            (
+                f"{swift_name}: field types differ.\n"
+                f"  swift: {swift_types}\n"
+                f"  msl:   {msl_types}"
+            )
+        ]
+
+    expected_stride, expected_alignment = stride(
+        swift_fields
+    )
+
+    assertion = asserted_layout(
+        tests,
+        swift_name,
+    )
+
+    if assertion is None:
+        failures.append(
+            (
+                f"{swift_name}: test suite has no "
+                "MemoryLayout stride/alignment assertions."
+            )
+        )
+
+        return failures
+
+    asserted_stride, asserted_alignment = assertion
+
+    if (
+        asserted_stride != expected_stride
+        or asserted_alignment != expected_alignment
+    ):
+        failures.append(
+            (
+                f"{swift_name}: tests assert "
+                f"{asserted_stride}/{asserted_alignment}, "
+                f"but mirrored layout produces "
+                f"{expected_stride}/{expected_alignment}."
+            )
+        )
+
+        return failures
+
+    print(
+        f"  ok  {swift_name:<16} "
+        f"<-> {msl_name:<16} "
+        f"{len(swift_fields)} fields, "
+        f"stride {expected_stride}, "
+        f"align {expected_alignment}"
+    )
+
+    return failures
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
 
 
 def main() -> int:
-    swift = swift_structs(read("*.swift"))
-    metal = msl_structs(read("*.metal"))
-    tests = TESTS.read_text()
+    swift_source = read_all(
+        SOURCES,
+        "*.swift",
+    )
+
+    metal_source = read_all(
+        SOURCES,
+        "*.metal",
+    )
+
+    test_source = read_all(
+        TESTS,
+        "*.swift",
+    )
+
+    swift = swift_structs(
+        swift_source
+    )
+
+    metal = msl_structs(
+        metal_source
+    )
+
     failures: list[str] = []
 
     for swift_name, msl_name in PAIRS.items():
-        if swift_name not in swift:
-            failures.append(f"Swift struct '{swift_name}' not found.")
-            continue
-        if msl_name not in metal:
-            failures.append(f"MSL struct '{msl_name}' not found.")
-            continue
-
-        swift_fields, msl_fields = swift[swift_name], metal[msl_name]
-
-        swift_names = [name for name, _ in swift_fields]
-        msl_names = [name for name, _ in msl_fields]
-        if swift_names != msl_names:
-            failures.append(
-                f"{swift_name}: field names differ.\n"
-                f"  swift: {swift_names}\n  msl:   {msl_names}"
+        failures.extend(
+            validate_pair(
+                swift_name,
+                msl_name,
+                swift,
+                metal,
+                test_source,
             )
-            continue
-
-        swift_types = [SWIFT_TO_MSL.get(type_, type_) for _, type_ in swift_fields]
-        msl_types = [type_ for _, type_ in msl_fields]
-        if swift_types != msl_types:
-            failures.append(
-                f"{swift_name}: field types differ.\n"
-                f"  swift: {swift_types}\n  msl:   {msl_types}"
-            )
-            continue
-
-        size, alignment = stride(swift_fields)
-
-        asserted_size = re.search(
-            rf"MemoryLayout<{swift_name}>\.stride, (\d+)", tests
-        )
-        asserted_align = re.search(
-            rf"MemoryLayout<{swift_name}>\.alignment, (\d+)", tests
-        )
-        if not asserted_size or not asserted_align:
-            failures.append(f"{swift_name}: PipelineTests has no stride assertion.")
-            continue
-        if int(asserted_size.group(1)) != size or int(asserted_align.group(1)) != alignment:
-            failures.append(
-                f"{swift_name}: PipelineTests asserts "
-                f"{asserted_size.group(1)}/{asserted_align.group(1)}, "
-                f"layout produces {size}/{alignment}."
-            )
-            continue
-
-        print(
-            f"  ok  {swift_name:<16} <-> {msl_name:<16} "
-            f"{len(swift_fields)} fields, stride {size}, align {alignment}"
         )
 
     if failures:
-        print("\nStruct parity check FAILED:\n", file=sys.stderr)
+        print(
+            "\nStruct parity check FAILED:\n",
+            file=sys.stderr,
+        )
+
         for failure in failures:
-            print(f"  {failure}", file=sys.stderr)
+            print(
+                f"  {failure}",
+                file=sys.stderr,
+            )
+
         return 1
 
-    print("\nSwift and MSL struct layouts agree.")
+    print(
+        "\nSwift and MSL struct layouts agree."
+    )
+
     return 0
 
 

@@ -23,17 +23,13 @@ enum ShaderLibrary {
     }
 
     static func make(device: MTLDevice) throws -> MTLLibrary {
-        do {
-            return try device.makeDefaultLibrary(bundle: .module)
-        } catch {
+        do { return try device.makeDefaultLibrary(bundle: .module) } catch {
             throw Error.libraryUnavailable(underlying: error)
         }
     }
 
     static func function(_ name: String, in library: MTLLibrary) throws -> MTLFunction {
-        guard let function = library.makeFunction(name: name) else {
-            throw Error.functionNotFound(name)
-        }
+        guard let function = library.makeFunction(name: name) else { throw Error.functionNotFound(name) }
         return function
     }
 }
