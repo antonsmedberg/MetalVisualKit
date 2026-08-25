@@ -24,7 +24,7 @@
 		05AFFC43C3D3EECFD8CA7E63 /* MetalVisualKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = MetalVisualKit; path = ../..; sourceTree = SOURCE_ROOT; };
 		0B97329BBC9795004D438354 /* MetalVisualKitDemoApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetalVisualKitDemoApp.swift; sourceTree = "<group>"; };
 		278FA936495A5DCE85A59F6B /* SpatialScanControlDeck.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpatialScanControlDeck.swift; sourceTree = "<group>"; };
-		3E78E3B054255017CC39CA74 /* MetalVisualKitDemo.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MetalVisualKitDemo.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		3E78E3B054255017CC39CA74 /* MetalVisualKitDemo.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = MetalVisualKitDemo.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		58F08212EE021FE0B69EBCA9 /* SpatialScanInfoView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpatialScanInfoView.swift; sourceTree = "<group>"; };
 		5C8149411097E05B246C0FCD /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		90F529EEC688FD7F34A2F5AA /* MetalVisualShowcase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetalVisualShowcase.swift; sourceTree = "<group>"; };
@@ -152,6 +152,8 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 2600;
+				TargetAttributes = {
+				};
 			};
 			buildConfigurationList = 8CD6A758A68751EC195A601D /* Build configuration list for PBXProject "MetalVisualKitDemo" */;
 			developmentRegion = en;
@@ -267,7 +269,6 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				DEVELOPMENT_TEAM = D54W2V5C5T;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -349,7 +350,6 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				DEVELOPMENT_TEAM = D54W2V5C5T;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
