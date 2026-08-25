@@ -1,9 +1,7 @@
 # MetalVisualKit SwiftLint configuration
 #
-# Keep this deliberately focused:
-# - swift-format owns formatting
-# - SwiftLint catches correctness, maintainability and structural issues
-# - GPU-oriented Swift may legitimately use short vector/matrix identifiers
+# swift-format owns formatting.
+# SwiftLint owns correctness, maintainability and structural checks.
 
 included:
   - Sources
@@ -16,11 +14,10 @@ excluded:
   - .swiftpm
 
 disabled_rules:
-  # TODOs are tracked deliberately in this repository.
+  # TODOs are intentionally tracked in this repository.
   - todo
 
-  # Short vector/matrix names such as x, y, uv and dt are idiomatic
-  # in Metal and graphics code.
+  # Short GPU identifiers such as x, y, uv and dt are idiomatic.
   - identifier_name
 
 opt_in_rules:
@@ -38,11 +35,6 @@ opt_in_rules:
   - toggle_bool
   - unneeded_parentheses_in_closure_argument
 
-# MARK: - Formatting compatibility
-
-# Must match:
-#   .swift-format -> indentSwitchCaseLabels: false
-#   Xcode          -> do not indent Swift case labels
 switch_case_alignment:
   severity: warning
   indented_cases: false
@@ -53,8 +45,6 @@ line_length:
   error: 160
   ignores_comments: true
   ignores_urls: true
-
-# MARK: - Maintainability
 
 function_body_length:
   warning: 50
@@ -76,5 +66,4 @@ cyclomatic_complexity:
   warning: 10
   error: 20
 
-# Better integration with Xcode's issue navigator.
 reporter: xcode
