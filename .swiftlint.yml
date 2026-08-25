@@ -1,7 +1,10 @@
 # MetalVisualKit SwiftLint configuration
 #
-# swift-format owns formatting.
-# SwiftLint owns correctness, maintainability and structural checks.
+# Formatting is owned by swift-format.
+# SwiftLint focuses on correctness, maintainability and structural quality.
+#
+# This distinction is intentional. Rules that duplicate or conflict with
+# swift-format should not be enabled here.
 
 included:
   - Sources
@@ -10,15 +13,23 @@ included:
 excluded:
   - .build
   - DerivedData
-  - Examples
   - .swiftpm
+  - Examples
 
 disabled_rules:
-  # TODOs are intentionally tracked in this repository.
+  # TODOs are deliberately tracked in this repository.
   - todo
 
-  # Short GPU identifiers such as x, y, uv and dt are idiomatic.
+  # Short GPU-oriented identifiers such as x, y, uv, dt and p0 are idiomatic
+  # in graphics, SIMD and Metal code.
   - identifier_name
+
+  # swift-format owns brace placement.
+  #
+  # In multiline declarations and control-flow statements swift-format may
+  # place the opening brace on the following line. SwiftLint's opening_brace
+  # rule can disagree with that canonical formatting.
+  - opening_brace
 
 opt_in_rules:
   - array_init
@@ -35,16 +46,15 @@ opt_in_rules:
   - toggle_bool
   - unneeded_parentheses_in_closure_argument
 
-switch_case_alignment:
-  severity: warning
-  indented_cases: false
-  ignore_one_liners: false
+# MARK: - Layout boundaries
 
 line_length:
   warning: 120
   error: 160
   ignores_comments: true
   ignores_urls: true
+
+# MARK: - Maintainability
 
 function_body_length:
   warning: 50
@@ -65,5 +75,21 @@ file_length:
 cyclomatic_complexity:
   warning: 10
   error: 20
+
+# MARK: - Switch layout
+
+# Keep this aligned with:
+#
+#   .swift-format:
+#       indentSwitchCaseLabels = false
+#
+# This remains useful because it catches accidental manual indentation while
+# not overlapping with brace placement.
+switch_case_alignment:
+  severity: warning
+  indented_cases: false
+  ignore_one_liners: false
+
+# MARK: - Output
 
 reporter: xcode
