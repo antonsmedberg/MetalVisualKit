@@ -6,16 +6,49 @@ end_of_line = lf
 insert_final_newline = true
 trim_trailing_whitespace = true
 
-[*.{swift,metal,py}]
+# Swift source
+[*.swift]
 indent_style = space
 indent_size = 4
+tab_width = 4
+max_line_length = 120
 
+# Metal shaders
+[*.metal]
+indent_style = space
+indent_size = 4
+tab_width = 4
+max_line_length = 120
+
+# Python scripts
+[*.py]
+indent_style = space
+indent_size = 4
+tab_width = 4
+max_line_length = 120
+
+# Shell scripts
+[*.{sh,bash,zsh}]
+indent_style = space
+indent_size = 4
+tab_width = 4
+
+# Configuration files
 [*.{json,yml,yaml}]
 indent_style = space
 indent_size = 2
+tab_width = 2
 
+# Markdown may intentionally use two trailing spaces for hard line breaks.
 [*.md]
 trim_trailing_whitespace = false
+max_line_length = off
 
+# Make recipes require real tab characters.
 [Makefile]
 indent_style = tab
+indent_size = tab
+
+[*.mk]
+indent_style = tab
+indent_size = tab
